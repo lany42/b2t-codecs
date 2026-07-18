@@ -3,17 +3,17 @@
 // Any 4-bit nibble can index these encoder arrays.
 // b0000 == 0, b1111 == 15
 // INVARIANT: nibbles are, by definition, bounded on [0, 16).
-const ENCODER_LOWER: [u8; 16] = [
+pub const ENCODER_LOWER: [u8; 16] = [
     48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 97, 98, 99, 100, 101, 102,
 ];
-const ENCODER_UPPER: [u8; 16] = [
+pub const ENCODER_UPPER: [u8; 16] = [
     48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 65, 66, 67, 68, 69, 70,
 ];
 
 // ASCII-ordered decoding table on the range [MIN_ASCII, MAX_ASCII)
 // INVARIANT: non-base16 ASCII values MUST be marked with the sentinel 255
 // INVARIANT: base16 ASCII values MUST be marked with their location in the encoder alphabet
-const DECODER: [u8; 55] = [
+pub const DECODER: [u8; 55] = [
     0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 255, 255, 255, 255, 255, 255, 255, 10, 11, 12, 13, 14, 15, 255,
     255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
     255, 255, 255, 255, 255, 255, 10, 11, 12, 13, 14, 15,
@@ -21,55 +21,94 @@ const DECODER: [u8; 55] = [
 
 // INVARIANT: base16 bytes MUST fall within the range [MIN_ASCII, MAX_ASCII)
 // INVARIANT: MAX_ASCII - MIN_ASCII == DECODER.len()
-const MIN_ASCII: usize = 48;
-const MAX_ASCII: usize = 102 + 1; // One past the end
+pub const MIN_ASCII: usize = 48;
+pub const MAX_ASCII: usize = 102 + 1; // One past the end
 
-pub fn encode_base16_u8_string(byte: u8) -> String {
-    encode_base16_string(&byte.to_be_bytes())
+mod sealed {
+    pub trait Sealed {}
 }
 
-pub fn encode_base16_u8_string_upper(byte: u8) -> String {
-    encode_base16_string_upper(&byte.to_be_bytes())
+pub trait Base16: sealed::Sealed + Copy {
+    fn as_base16_string(&self) -> String;
+    fn as_base16_string_upper(&self) -> String;
+
+    fn as_base16(&self) -> Box<[u8]>;
+    fn as_base16_upper(&self) -> Box<[u8]>;
+
+    fn try_from_base16_string(base16_str: &str) -> Option<Self>;
+    fn try_from_base16(base16: &[u8]) -> Option<Self>;
 }
 
-pub fn encode_base16_u8(byte: u8) -> Box<[u8]> {
-    encode_base16(&byte.to_be_bytes())
+macro_rules! impl_base16 {
+    ($($ty:ty),+ $(,)?) => {
+        $(
+            impl sealed::Sealed for $ty {}
+
+            impl Base16 for $ty {
+                #[inline]
+                fn as_base16_string(&self) -> String {
+                    as_base16_string(&self.as_base16())
+                }
+
+                #[inline]
+                fn as_base16_string_upper(&self) -> String {
+                    as_base16_string_upper(&self.as_base16_upper())
+                }
+
+                #[inline]
+                fn as_base16(&self) -> Box<[u8]> {
+                    as_base16(&self.to_be_bytes(), &ENCODER_LOWER)
+                }
+
+                #[inline]
+                fn as_base16_upper(&self) -> Box<[u8]> {
+                    as_base16(&self.to_be_bytes(), &ENCODER_UPPER)
+                }
+
+                #[inline]
+                fn try_from_base16_string(base16_str: &str) -> Option<Self> {
+                    Self::try_from_base16(base16_str.as_bytes())
+                }
+
+                #[inline]
+                fn try_from_base16(base16: &[u8]) -> Option<Self> {
+                    const SIZE: usize = std::mem::size_of::<$ty>();
+                    if base16.len() != SIZE {
+                        return None;
+                    }
+
+                    if let Some(bytes) = try_from_base16(base16) {
+                        let bytes = <[u8; SIZE]>::try_from(&bytes[..SIZE]).unwrap();
+                        return Some(Self::from_be_bytes(bytes));
+                    }
+
+                    None
+                }
+            }
+        )+
+    };
 }
 
-pub fn encode_base16_u16_string(word: u16) -> String {
-    encode_base16_string(&word.to_be_bytes())
-}
+impl_base16!(
+    u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize
+);
 
-pub fn encode_base16_u16_string_upper(word: u16) -> String {
-    encode_base16_string_upper(&word.to_be_bytes())
-}
-
-pub fn encode_base16_u16(word: u16) -> Box<[u8]> {
-    encode_base16(&word.to_be_bytes())
-}
-
-pub fn encode_base16_string(bytes: &[u8]) -> String {
-    let base16_bytes = encode_base16(bytes);
+#[inline]
+pub fn as_base16_string(bytes: &[u8]) -> String {
+    let base16_bytes = as_base16(bytes, &ENCODER_LOWER);
     // SAFETY: base16 bytes are ASCII, therefore always valid UTF-8
     unsafe { String::from_utf8_unchecked(base16_bytes.into_vec()) }
-}
-
-pub fn encode_base16_string_upper(bytes: &[u8]) -> String {
-    let base16_bytes = encode_base16_upper(bytes);
-    // SAFETY: base16 bytes are ASCII, therefore always valid UTF-8
-    unsafe { String::from_utf8_unchecked(base16_bytes.into_vec()) }
-}
-
-pub fn encode_base16(bytes: &[u8]) -> Box<[u8]> {
-    encode_base16_impl(bytes, &ENCODER_LOWER)
-}
-
-pub fn encode_base16_upper(bytes: &[u8]) -> Box<[u8]> {
-    encode_base16_impl(bytes, &ENCODER_UPPER)
 }
 
 #[inline]
-fn encode_base16_impl(bytes: &[u8], encoder: &[u8; 16]) -> Box<[u8]> {
+pub fn as_base16_string_upper(bytes: &[u8]) -> String {
+    let base16_bytes = as_base16(bytes, &ENCODER_UPPER);
+    // SAFETY: base16 bytes are ASCII, therefore always valid UTF-8
+    unsafe { String::from_utf8_unchecked(base16_bytes.into_vec()) }
+}
+
+#[inline]
+pub fn as_base16(bytes: &[u8], encoder: &[u8; 16]) -> Box<[u8]> {
     if bytes.is_empty() {
         return Vec::<u8>::new().into_boxed_slice();
     }
@@ -91,11 +130,13 @@ fn encode_base16_impl(bytes: &[u8], encoder: &[u8; 16]) -> Box<[u8]> {
     ret.into_boxed_slice()
 }
 
-pub fn from_hex_string(hex_str: &str) -> Option<Box<[u8]>> {
-    from_hex(hex_str.as_bytes())
+#[inline]
+pub fn try_from_base16_str(base16: &str) -> Option<Box<[u8]>> {
+    try_from_base16(base16.as_bytes())
 }
 
-pub fn from_hex(base16: &[u8]) -> Option<Box<[u8]>> {
+#[inline]
+pub fn try_from_base16(base16: &[u8]) -> Option<Box<[u8]>> {
     // INVARIANT: MAX_ASCII must always be larger than MIN_ASCII
     const { assert!(MAX_ASCII > MIN_ASCII) }
 
@@ -155,9 +196,9 @@ mod test {
 
     #[test]
     fn decode_hex() {
-        assert_eq!(*from_hex(b"FF").unwrap(), [0xFF]);
-        assert_eq!(*from_hex(b"00").unwrap(), [0x00]);
-        assert_eq!(*from_hex(b"0A").unwrap(), [0x0A]);
-        assert_eq!(*from_hex(b"A0").unwrap(), [0xA0]);
+        assert_eq!(*try_from_base16(b"FF").unwrap(), [0xFF]);
+        assert_eq!(*try_from_base16(b"00").unwrap(), [0x00]);
+        assert_eq!(*try_from_base16(b"0A").unwrap(), [0x0A]);
+        assert_eq!(*try_from_base16(b"A0").unwrap(), [0xA0]);
     }
 }
