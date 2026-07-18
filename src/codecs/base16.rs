@@ -6,9 +6,6 @@
 pub const ENCODER_LOWER: [u8; 16] = [
     48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 97, 98, 99, 100, 101, 102,
 ];
-pub const ENCODER_UPPER: [u8; 16] = [
-    48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 65, 66, 67, 68, 69, 70,
-];
 
 // ASCII-ordered decoding table on the range [MIN_ASCII, MAX_ASCII)
 // INVARIANT: non-base16 ASCII values MUST be marked with the sentinel 255
@@ -30,10 +27,8 @@ mod sealed {
 
 pub trait Base16: sealed::Sealed + Copy {
     fn as_base16_string(&self) -> String;
-    fn as_base16_string_upper(&self) -> String;
 
     fn as_base16(&self) -> Box<[u8]>;
-    fn as_base16_upper(&self) -> Box<[u8]>;
 
     fn try_from_base16_string(base16_str: &str) -> Option<Self>;
     fn try_from_base16(base16: &[u8]) -> Option<Self>;
@@ -47,22 +42,12 @@ macro_rules! impl_base16 {
             impl Base16 for $ty {
                 #[inline]
                 fn as_base16_string(&self) -> String {
-                    as_base16_string(&self.as_base16())
-                }
-
-                #[inline]
-                fn as_base16_string_upper(&self) -> String {
-                    as_base16_string_upper(&self.as_base16_upper())
+                    as_base16_string(&self.to_be_bytes(), &ENCODER_LOWER)
                 }
 
                 #[inline]
                 fn as_base16(&self) -> Box<[u8]> {
                     as_base16(&self.to_be_bytes(), &ENCODER_LOWER)
-                }
-
-                #[inline]
-                fn as_base16_upper(&self) -> Box<[u8]> {
-                    as_base16(&self.to_be_bytes(), &ENCODER_UPPER)
                 }
 
                 #[inline]
@@ -72,13 +57,13 @@ macro_rules! impl_base16 {
 
                 #[inline]
                 fn try_from_base16(base16: &[u8]) -> Option<Self> {
-                    const SIZE: usize = std::mem::size_of::<$ty>();
+                    const SIZE: usize = std::mem::size_of::<$ty>() * 2;
                     if base16.len() != SIZE {
                         return None;
                     }
 
-                    if let Some(bytes) = try_from_base16(base16) {
-                        let bytes = <[u8; SIZE]>::try_from(&bytes[..SIZE]).unwrap();
+                    if let Some(bytes) = try_decode_base16(base16) {
+                        let bytes = bytes.as_ref().try_into().ok()?;
                         return Some(Self::from_be_bytes(bytes));
                     }
 
@@ -94,21 +79,24 @@ impl_base16!(
 );
 
 #[inline]
-pub fn as_base16_string(bytes: &[u8]) -> String {
-    let base16_bytes = as_base16(bytes, &ENCODER_LOWER);
+pub fn encode_base16_string(bytes: &[u8]) -> String {
+    as_base16_string(bytes, &ENCODER_LOWER)
+}
+
+#[inline]
+pub fn encode_base16(bytes: &[u8]) -> Box<[u8]> {
+    as_base16(bytes, &ENCODER_LOWER)
+}
+
+#[inline]
+fn as_base16_string(bytes: &[u8], encoder: &[u8; 16]) -> String {
+    let base16_bytes = as_base16(bytes, encoder);
     // SAFETY: base16 bytes are ASCII, therefore always valid UTF-8
     unsafe { String::from_utf8_unchecked(base16_bytes.into_vec()) }
 }
 
 #[inline]
-pub fn as_base16_string_upper(bytes: &[u8]) -> String {
-    let base16_bytes = as_base16(bytes, &ENCODER_UPPER);
-    // SAFETY: base16 bytes are ASCII, therefore always valid UTF-8
-    unsafe { String::from_utf8_unchecked(base16_bytes.into_vec()) }
-}
-
-#[inline]
-pub fn as_base16(bytes: &[u8], encoder: &[u8; 16]) -> Box<[u8]> {
+fn as_base16(bytes: &[u8], encoder: &[u8; 16]) -> Box<[u8]> {
     if bytes.is_empty() {
         return Vec::<u8>::new().into_boxed_slice();
     }
@@ -131,12 +119,12 @@ pub fn as_base16(bytes: &[u8], encoder: &[u8; 16]) -> Box<[u8]> {
 }
 
 #[inline]
-pub fn try_from_base16_str(base16: &str) -> Option<Box<[u8]>> {
-    try_from_base16(base16.as_bytes())
+pub fn try_decode_base16_string(base16: &str) -> Option<Box<[u8]>> {
+    try_decode_base16(base16.as_bytes())
 }
 
 #[inline]
-pub fn try_from_base16(base16: &[u8]) -> Option<Box<[u8]>> {
+pub fn try_decode_base16(base16: &[u8]) -> Option<Box<[u8]>> {
     // INVARIANT: MAX_ASCII must always be larger than MIN_ASCII
     const { assert!(MAX_ASCII > MIN_ASCII) }
 
@@ -193,12 +181,123 @@ pub fn try_from_base16(base16: &[u8]) -> Option<Box<[u8]>> {
 #[cfg(test)]
 mod test {
     use super::*;
+    use std::fmt::Debug;
 
     #[test]
-    fn decode_hex() {
-        assert_eq!(*try_from_base16(b"FF").unwrap(), [0xFF]);
-        assert_eq!(*try_from_base16(b"00").unwrap(), [0x00]);
-        assert_eq!(*try_from_base16(b"0A").unwrap(), [0x0A]);
-        assert_eq!(*try_from_base16(b"A0").unwrap(), [0xA0]);
+    fn decode_valid_base16() {
+        assert_eq!(*try_decode_base16(b"FF").unwrap(), [0xFF]);
+        assert_eq!(*try_decode_base16(b"00").unwrap(), [0x00]);
+        assert_eq!(*try_decode_base16(b"0A").unwrap(), [0x0A]);
+        assert_eq!(*try_decode_base16(b"A0").unwrap(), [0xA0]);
+        assert_eq!(
+            *try_decode_base16(b"deadBEEF").unwrap(),
+            [0xDE, 0xAD, 0xBE, 0xEF]
+        );
+        assert_eq!(&*try_decode_base16(b"").unwrap(), b"");
+    }
+
+    #[test]
+    fn decode_rejects_invalid_base16() {
+        assert_eq!(try_decode_base16(b"0"), None);
+
+        for invalid in [u8::MIN, b'/', b'g', u8::MAX] {
+            assert_eq!(try_decode_base16(&[invalid, b'0']), None);
+            assert_eq!(try_decode_base16(&[b'0', invalid]), None);
+        }
+
+        assert_eq!(try_decode_base16(b":0"), None);
+        assert_eq!(try_decode_base16(b"0:"), None);
+    }
+
+    #[test]
+    fn encode_bytes_as_lowercase_base16() {
+        let cases: &[(&[u8], &str)] = &[
+            (&[], ""),
+            (&[0x00], "00"),
+            (&[0xFF], "ff"),
+            (&[0xDE, 0xAD, 0xBE, 0xEF], "deadbeef"),
+            (&[0x00, 0x01, 0x0F, 0x10, 0xAB, 0xFF], "00010f10abff"),
+        ];
+
+        for &(bytes, expected) in cases {
+            assert_eq!(encode_base16(bytes).as_ref(), expected.as_bytes());
+            assert_eq!(encode_base16_string(bytes), expected);
+        }
+    }
+
+    #[test]
+    fn base16_strings_roundtrip_as_lowercase() {
+        for (base16, canonical) in [
+            ("", ""),
+            ("00", "00"),
+            ("deadbeef", "deadbeef"),
+            ("DEADBEEF", "deadbeef"),
+            ("0123456789aBcDeF", "0123456789abcdef"),
+        ] {
+            let bytes = try_decode_base16_string(base16).unwrap();
+            assert_eq!(encode_base16_string(&bytes), canonical);
+        }
+    }
+
+    fn assert_primitive_encoding<T>(value: T, expected: &str)
+    where
+        T: Base16 + Debug + Eq,
+    {
+        let base16_string = value.as_base16_string();
+        let base16 = value.as_base16();
+
+        assert_eq!(base16_string, expected);
+        assert_eq!(base16.as_ref(), expected.as_bytes());
+        assert_eq!(T::try_from_base16_string(&base16_string), Some(value));
+        assert_eq!(T::try_from_base16(&base16), Some(value));
+        assert_eq!(T::try_from_base16(&base16[..base16.len() - 1]), None);
+    }
+
+    #[test]
+    fn integer_primitive_encodings_are_pinned() {
+        macro_rules! assert_min_and_max_encoding {
+            ($ty:ty, $min:literal, $max:literal) => {
+                assert_primitive_encoding(<$ty>::MIN, $min);
+                assert_primitive_encoding(<$ty>::MAX, $max);
+            };
+        }
+
+        assert_min_and_max_encoding!(u8, "00", "ff");
+        assert_min_and_max_encoding!(u16, "0000", "ffff");
+        assert_min_and_max_encoding!(u32, "00000000", "ffffffff");
+        assert_min_and_max_encoding!(u64, "0000000000000000", "ffffffffffffffff");
+        assert_min_and_max_encoding!(
+            u128,
+            "00000000000000000000000000000000",
+            "ffffffffffffffffffffffffffffffff"
+        );
+
+        assert_min_and_max_encoding!(i8, "80", "7f");
+        assert_min_and_max_encoding!(i16, "8000", "7fff");
+        assert_min_and_max_encoding!(i32, "80000000", "7fffffff");
+        assert_min_and_max_encoding!(i64, "8000000000000000", "7fffffffffffffff");
+        assert_min_and_max_encoding!(
+            i128,
+            "80000000000000000000000000000000",
+            "7fffffffffffffffffffffffffffffff"
+        );
+
+        #[cfg(target_pointer_width = "16")]
+        {
+            assert_min_and_max_encoding!(usize, "0000", "ffff");
+            assert_min_and_max_encoding!(isize, "8000", "7fff");
+        }
+
+        #[cfg(target_pointer_width = "32")]
+        {
+            assert_min_and_max_encoding!(usize, "00000000", "ffffffff");
+            assert_min_and_max_encoding!(isize, "80000000", "7fffffff");
+        }
+
+        #[cfg(target_pointer_width = "64")]
+        {
+            assert_min_and_max_encoding!(usize, "0000000000000000", "ffffffffffffffff");
+            assert_min_and_max_encoding!(isize, "8000000000000000", "7fffffffffffffff");
+        }
     }
 }
