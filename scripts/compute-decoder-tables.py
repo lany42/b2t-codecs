@@ -40,7 +40,7 @@ class CodecTables:
     accepted_ascii: int
 
 
-ASCII85 = (
+BASE85 = (
     "!\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`"
     "abcdefghijklmnopqrstu"
 )
@@ -57,7 +57,7 @@ BASE64_URL = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
 # Keep this registry independent of CODECS so every literal is checked even
 # when only one codec is selected on the command line.
 ALPHABET_LENGTH_CHECKS = (
-    ("ASCII85", ASCII85, 85),
+    ("BASE85", BASE85, 85),
     ("Z85", Z85, 85),
     ("BASE16_UPPER", BASE16_UPPER, 16),
     ("BASE16_LOWER", BASE16_LOWER, 16),
@@ -83,7 +83,7 @@ check_alphabet_lengths()
 
 
 CODECS = (
-    Codec("ascii85", "ASCII85", 85, (Encoder("ENCODER", ASCII85),)),
+    Codec("base85", "Base85", 85, (Encoder("ENCODER", BASE85),)),
     Codec("z85", "Z85", 85, (Encoder("ENCODER", Z85),)),
     Codec("base64", "Base64", 64, (Encoder("ENCODER", BASE64),)),
     Codec(
