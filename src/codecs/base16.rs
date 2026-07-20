@@ -3,14 +3,14 @@
 // Any 4-bit nibble can index these encoder arrays.
 // b0000 == 0, b1111 == 15
 // INVARIANT: nibbles are, by definition, bounded on [0, 16).
-pub const ENCODER_LOWER: [u8; 16] = [
+const ENCODER_LOWER: [u8; 16] = [
     48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 97, 98, 99, 100, 101, 102,
 ];
 
 // ASCII-ordered decoding table on the range [MIN_ASCII, MAX_ASCII)
 // INVARIANT: non-base16 ASCII values MUST be marked with the sentinel 255
 // INVARIANT: base16 ASCII values MUST be marked with their location in the encoder alphabet
-pub const DECODER: [u8; 55] = [
+const DECODER: [u8; 55] = [
     0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 255, 255, 255, 255, 255, 255, 255, 10, 11, 12, 13, 14, 15, 255,
     255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
     255, 255, 255, 255, 255, 255, 10, 11, 12, 13, 14, 15,
@@ -18,8 +18,8 @@ pub const DECODER: [u8; 55] = [
 
 // INVARIANT: base16 bytes MUST fall within the range [MIN_ASCII, MAX_ASCII)
 // INVARIANT: MAX_ASCII - MIN_ASCII == DECODER.len()
-pub const MIN_ASCII: usize = 48;
-pub const MAX_ASCII: usize = 102 + 1; // One past the end
+const MIN_ASCII: usize = 48;
+const MAX_ASCII: usize = 102 + 1; // One past the end
 
 mod sealed {
     pub trait Sealed {}
