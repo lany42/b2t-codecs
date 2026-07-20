@@ -136,7 +136,7 @@ pub fn try_decode_base16(base16: &[u8]) -> Option<Box<[u8]>> {
         return Some(Vec::<u8>::new().into_boxed_slice());
     }
 
-    // input length must be a multiple of two
+    // INVARIANT: input length must be a multiple of two
     if !base16.len().is_multiple_of(2) {
         return None;
     }
