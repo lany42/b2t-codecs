@@ -50,6 +50,8 @@ Z85 = (
 )
 BASE16_UPPER = "0123456789ABCDEF"
 BASE16_LOWER = "0123456789abcdef"
+BASE32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
+BASE32_HEX = "0123456789ABCDEFGHIJKLMNOPQRSTUV"
 BASE64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
 BASE64_URL = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
 
@@ -61,6 +63,8 @@ ALPHABET_LENGTH_CHECKS = (
     ("Z85", Z85, 85),
     ("BASE16_UPPER", BASE16_UPPER, 16),
     ("BASE16_LOWER", BASE16_LOWER, 16),
+    ("BASE32", BASE32, 32),
+    ("BASE32_HEX", BASE32_HEX, 32),
     ("BASE64", BASE64, 64),
     ("BASE64_URL", BASE64_URL, 64),
 )
@@ -85,6 +89,13 @@ check_alphabet_lengths()
 CODECS = (
     Codec("base85", "Base85", 85, (Encoder("ENCODER", BASE85),)),
     Codec("z85", "Z85", 85, (Encoder("ENCODER", Z85),)),
+    Codec("base32", "Base32", 32, (Encoder("ENCODER", BASE32),)),
+    Codec(
+        "base32hex",
+        "Base32Hex",
+        32,
+        (Encoder("ENCODER", BASE32_HEX),),
+    ),
     Codec("base64", "Base64", 64, (Encoder("ENCODER", BASE64),)),
     Codec(
         "base64-url",
