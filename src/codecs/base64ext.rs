@@ -1,5 +1,7 @@
 // BASE64 CODEC
-// Canonical RFC 4648 Base64, rejecting non-zero pad-bit aliases, missing padding, and malformed inputs.
+// Strictly emits canonical RFC 4648 Base64 and rejects non-zero pad-bit aliases.
+// Decoding is extended to accept omitted final padding, treat independently padded
+// quanta as concatenated Base64 values, and ignore all-padding quanta.
 // https://www.rfc-editor.org/rfc/rfc4648.html
 
 const ENCODER: [u8; 64] = [
@@ -111,7 +113,8 @@ pub fn encode_base64(bytes: &[u8]) -> Box<[u8]> {
     let mut ret = Vec::<u8>::with_capacity(capacity);
 
     for &chunk in chunks {
-        ret.extend_from_slice(&encode_base64_full_chunk(chunk));
+        let encoded = encode_base64_full_chunk(chunk);
+        ret.extend_from_slice(&encoded);
     }
 
     if !remainder.is_empty() {
@@ -158,11 +161,15 @@ fn encode_base64_tail(tail: &[u8]) -> [u8; 4] {
     let mut encoded = encode_base64_full_chunk(padded);
 
     // replace bytes in the encoded position with b'=' based on tail length
-    //      - 1 byte  => two encoded bytes and two pad bytes
-    //      - 2 bytes => three encoded bytes and single pad byte
-    // That is, N_PAD_START = len + 1
-    for b in encoded[len + 1..].iter_mut() {
-        *b = BASE64_PAD;
+    //      - 1 byte  => two encoded bytes and two b'=' bytes
+    //      - 2 bytes => three encoded bytes and one b'=' byte
+    match len {
+        1 => {
+            encoded[2] = BASE64_PAD;
+            encoded[3] = BASE64_PAD;
+        }
+        2 => encoded[3] = BASE64_PAD,
+        _ => unreachable!("tail length must be one or two"),
     }
 
     encoded
@@ -186,29 +193,39 @@ pub fn try_decode_base64(base64: &[u8]) -> Option<Box<[u8]>> {
         return Some(Vec::<u8>::new().into_boxed_slice());
     }
 
-    // INVARIANT: strict base64 encodes four ASCII per three bytes
-    if !base64.len().is_multiple_of(4) {
-        return None;
-    }
+    // base64 encodes four ASCII bytes per three byte chunks
+    // an unpadded tail implies up to two extra bytes
+    let capacity = base64.len().checked_mul(3)? / 4 + 2;
 
-    let capacity = base64.len().checked_mul(3)? / 4;
+    // ideally, every input base64 evenly divides into chunks of 4
+    // but we gracefully handle implied padding.
+    // all-padding chunks DO NOT contribute to the byte stream
+    // NOTE: the consequence of this is two concatenated base64 strings
+    // will round-trip as an entirely different base64 string if they have padding
+    let (chunks, remainder) = base64.as_chunks::<4>();
     let mut ret = Vec::<u8>::with_capacity(capacity);
-    let (chunks, []) = base64.as_chunks::<4>() else {
-        unreachable!("base64 slice always a multiple of 4")
-    };
-    let (tail, chunks) = chunks.split_last().unwrap();
 
-    // whole chunks
-    // padding characters are malformed here
     for &chunk in chunks {
-        ret.extend_from_slice(&decode_base64_full_chunk(chunk)?)
+        // possibly a valid chunk
+        // malformed chunks return immediately
+        match chunk {
+            // skip chunks with only padding
+            [BASE64_PAD, BASE64_PAD, BASE64_PAD, BASE64_PAD] => {}
+            [_, _, BASE64_PAD, BASE64_PAD] => ret.push(decode_base64_two_pads(chunk)?),
+            [_, _, _, BASE64_PAD] => ret.extend_from_slice(&decode_base64_one_pad(chunk)?),
+            _ => ret.extend_from_slice(&decode_base64_full_chunk(chunk)?),
+        }
     }
 
-    // handle padding at the tail
-    match tail {
-        [_, _, BASE64_PAD, BASE64_PAD] => ret.push(decode_base64_two_pads(*tail)?),
-        [_, _, _, BASE64_PAD] => ret.extend_from_slice(&decode_base64_one_pad(*tail)?),
-        _ => ret.extend_from_slice(&decode_base64_full_chunk(*tail)?),
+    // handle a tail with implied padding, if any
+    if !remainder.is_empty() {
+        // malformed if one ASCII character
+        if remainder.len() == 1 {
+            return None;
+        }
+
+        // [x, x] OR [x, x, x]
+        decode_base64_tail(remainder, &mut ret)?;
     }
 
     Some(ret.into_boxed_slice())
@@ -270,6 +287,23 @@ fn decode_base64_one_pad(chunk: [u8; 4]) -> Option<[u8; 2]> {
     // return two bytes only: [0, x, x, _]
     let bytes = n.to_be_bytes();
     Some([bytes[1], bytes[2]])
+}
+
+// tail length 2 OR 3
+#[inline]
+fn decode_base64_tail(tail: &[u8], ret: &mut Vec<u8>) -> Option<()> {
+    let length = tail.len();
+    assert!(length == 2 || length == 3);
+
+    let mut buf = [BASE64_PAD; 4];
+    buf[..length].copy_from_slice(tail);
+    match length {
+        2 => ret.push(decode_base64_two_pads(buf)?),
+        3 => ret.extend_from_slice(&decode_base64_one_pad(buf)?),
+        _ => unreachable!("tail length must be 2 or 3"),
+    }
+
+    Some(())
 }
 
 #[inline]
@@ -375,16 +409,9 @@ mod test {
     }
 
     #[test]
-    fn decode_requires_complete_quanta() {
-        for input in [
-            b"A".as_slice(),
-            b"Zg".as_slice(),
-            b"Zm8".as_slice(),
-            b"AAAAA".as_slice(),
-            b"AAAAAA".as_slice(),
-            b"AAAAAAA".as_slice(),
-        ] {
-            assert_eq!(try_decode_base64(input), None, "accepted {input:?}");
+    fn decode_accepts_unpadded_final_quantum() {
+        for (input, expected) in [("Zg", b"f".as_slice()), ("Zm8", b"fo".as_slice())] {
+            assert_eq!(try_decode_base64_string(input).as_deref(), Some(expected));
         }
     }
 
@@ -407,17 +434,42 @@ mod test {
     }
 
     #[test]
-    fn decode_rejects_non_terminal_or_malformed_padding() {
+    fn decode_accepts_padding_only_chunks() {
+        for input in [b"====".as_slice(), b"========".as_slice()] {
+            assert_eq!(try_decode_base64(input).as_deref(), Some(b"".as_slice()));
+        }
+    }
+
+    #[test]
+    fn decode_treats_padded_quanta_as_concatenated_values() {
+        assert_eq!(
+            try_decode_base64_string("TQ==TQ==").as_deref(),
+            Some(b"MM".as_slice())
+        );
+    }
+
+    #[test]
+    fn decode_rejects_single_ascii_tails() {
         for input in [
-            b"====".as_slice(),
-            b"========".as_slice(),
-            b"TQ==TQ==".as_slice(),
-            b"TWE=TWE=".as_slice(),
+            b"A".as_slice(),
+            b"AAAAA".as_slice(),
+            b"AAAAAAAAA".as_slice(),
+        ] {
+            assert_eq!(try_decode_base64(input), None, "accepted {input:?}");
+        }
+    }
+
+    #[test]
+    fn decode_rejects_misplaced_or_partial_padding() {
+        for input in [
             b"=AAA".as_slice(),
             b"A=AA".as_slice(),
             b"AA=A".as_slice(),
             b"A===".as_slice(),
             b"===A".as_slice(),
+            b"===".as_slice(),
+            b"AA=".as_slice(),
+            b"A==".as_slice(),
         ] {
             assert_eq!(try_decode_base64(input), None, "accepted {input:?}");
         }
