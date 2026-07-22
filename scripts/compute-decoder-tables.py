@@ -29,6 +29,9 @@ class Codec:
     title: str
     radix: int
     encoders: tuple[Encoder, ...]
+    decoder_constant: str = "DECODER"
+    min_ascii_constant: str = "MIN_ASCII"
+    max_ascii_constant: str = "MAX_ASCII"
 
 
 @dataclass(frozen=True)
@@ -105,12 +108,30 @@ CODECS = (
     ),
     Codec(
         "base16",
-        "Base16",
+        "Base16 mixed case",
         16,
         (
             Encoder("ENCODER_UPPER", BASE16_UPPER),
             Encoder("ENCODER_LOWER", BASE16_LOWER),
         ),
+    ),
+    Codec(
+        "base16-lower",
+        "Base16 lowercase",
+        16,
+        (Encoder("ENCODER_LOWER", BASE16_LOWER),),
+        decoder_constant="DECODER_LOWER",
+        min_ascii_constant="MIN_ASCII_LOWER",
+        max_ascii_constant="MAX_ASCII_LOWER",
+    ),
+    Codec(
+        "base16-upper",
+        "Base16 uppercase",
+        16,
+        (Encoder("ENCODER_UPPER", BASE16_UPPER),),
+        decoder_constant="DECODER_UPPER",
+        min_ascii_constant="MIN_ASCII_UPPER",
+        max_ascii_constant="MAX_ASCII_UPPER",
     ),
 )
 
@@ -217,11 +238,11 @@ def format_tables(tables: CodecTables, width: int) -> str:
 
     lines.extend(
         (
-            format_rust_array("DECODER", tables.decoder, width),
+            format_rust_array(codec.decoder_constant, tables.decoder, width),
             "",
-            f"const MIN_ASCII: usize = {tables.min_ascii};",
+            f"const {codec.min_ascii_constant}: usize = {tables.min_ascii};",
             (
-                f"const MAX_ASCII: usize = {max_inclusive} + 1; "
+                f"const {codec.max_ascii_constant}: usize = {max_inclusive} + 1; "
                 "// Exclusive; one past the end."
             ),
         )
