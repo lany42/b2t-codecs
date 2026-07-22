@@ -1,11 +1,17 @@
 // BASE64 CODEC
-// Canonical RFC 4648 Base64, rejecting non-zero pad-bit aliases, missing padding, and malformed inputs.
+// Canonical RFC 4648 Base64 and Base64URL codecs. Strict decoders reject
+// non-zero pad-bit aliases, missing padding, and malformed inputs; extended
+// decoders additionally support unpadded tails and concatenated padded values.
 // https://www.rfc-editor.org/rfc/rfc4648.html
 
 mod dec;
 mod enc;
 
-pub use dec::{try_decode_base64, try_decode_base64url};
+pub use dec::{
+    try_decode_base64, try_decode_base64_string, try_decode_base64ext, try_decode_base64ext_string,
+    try_decode_base64url, try_decode_base64url_string, try_decode_base64urlext,
+    try_decode_base64urlext_string,
+};
 pub use enc::{encode_base64, encode_base64_string, encode_base64url, encode_base64url_string};
 
 const ENCODER: [u8; 64] = [
@@ -49,7 +55,7 @@ const MAX_ASCII_URL: usize = 122 + 1; // Exclusive; one past the end.
 const BASE64_PAD: u8 = b'=';
 
 #[inline]
-pub fn trim_end_padding(bytes: Box<[u8]>) -> Box<[u8]> {
+pub fn trim_base64_end_padding(bytes: Box<[u8]>) -> Box<[u8]> {
     let mut bytes = bytes.into_vec();
     while let Some(&c) = bytes.last() {
         if c != BASE64_PAD {
@@ -158,3 +164,121 @@ macro_rules! impl_base64 {
 impl_base64!(
     u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize
 );
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fmt::Debug;
+
+    fn assert_primitive_encoding<T>(value: T, expected: &str)
+    where
+        T: Base64 + Base64Url + Copy + Debug + Eq,
+    {
+        let encoded_string = value.as_base64_string();
+        let encoded = value.as_base64();
+
+        assert_eq!(encoded_string, expected);
+        assert_eq!(encoded.as_ref(), expected.as_bytes());
+        assert_eq!(T::try_from_base64_string(&encoded_string), Some(value));
+        assert_eq!(T::try_from_base64(&encoded), Some(value));
+
+        let expected_url = expected.replace('+', "-").replace('/', "_");
+        let encoded_url_string = value.as_base64url_string();
+        let encoded_url = value.as_base64url();
+
+        assert_eq!(encoded_url_string, expected_url);
+        assert_eq!(encoded_url.as_ref(), expected_url.as_bytes());
+        assert_eq!(
+            T::try_from_base64url_string(&encoded_url_string),
+            Some(value)
+        );
+        assert_eq!(T::try_from_base64url(&encoded_url), Some(value));
+    }
+
+    #[test]
+    fn integer_primitive_encodings_are_pinned() {
+        macro_rules! assert_min_and_max_encoding {
+            ($ty:ty, $min:literal, $max:literal) => {
+                assert_primitive_encoding(<$ty>::MIN, $min);
+                assert_primitive_encoding(<$ty>::MAX, $max);
+            };
+        }
+
+        assert_min_and_max_encoding!(u8, "AA==", "/w==");
+        assert_min_and_max_encoding!(u16, "AAA=", "//8=");
+        assert_min_and_max_encoding!(u32, "AAAAAA==", "/////w==");
+        assert_min_and_max_encoding!(u64, "AAAAAAAAAAA=", "//////////8=");
+        assert_min_and_max_encoding!(u128, "AAAAAAAAAAAAAAAAAAAAAA==", "/////////////////////w==");
+
+        assert_min_and_max_encoding!(i8, "gA==", "fw==");
+        assert_min_and_max_encoding!(i16, "gAA=", "f/8=");
+        assert_min_and_max_encoding!(i32, "gAAAAA==", "f////w==");
+        assert_min_and_max_encoding!(i64, "gAAAAAAAAAA=", "f/////////8=");
+        assert_min_and_max_encoding!(i128, "gAAAAAAAAAAAAAAAAAAAAA==", "f////////////////////w==");
+
+        #[cfg(target_pointer_width = "16")]
+        {
+            assert_min_and_max_encoding!(usize, "AAA=", "//8=");
+            assert_min_and_max_encoding!(isize, "gAA=", "f/8=");
+        }
+
+        #[cfg(target_pointer_width = "32")]
+        {
+            assert_min_and_max_encoding!(usize, "AAAAAA==", "/////w==");
+            assert_min_and_max_encoding!(isize, "gAAAAA==", "f////w==");
+        }
+
+        #[cfg(target_pointer_width = "64")]
+        {
+            assert_min_and_max_encoding!(usize, "AAAAAAAAAAA=", "//////////8=");
+            assert_min_and_max_encoding!(isize, "gAAAAAAAAAA=", "f/////////8=");
+        }
+
+        // Exercise alphabet digit 62 as well as the digit-63 cases above.
+        assert_primitive_encoding(0xfbu8, "+w==");
+    }
+
+    #[test]
+    fn integer_primitive_decoding_requires_the_exact_data_width() {
+        assert_eq!(u32::try_from_base64(b"AAA="), None);
+        assert_eq!(u32::try_from_base64(b"AAAAAA=="), Some(0));
+        assert_eq!(u32::try_from_base64(b"AAAAAAAAAAA="), None);
+
+        assert_eq!(u32::try_from_base64url(b"AAA="), None);
+        assert_eq!(u32::try_from_base64url(b"AAAAAA=="), Some(0));
+        assert_eq!(u32::try_from_base64url(b"AAAAAAAAAAA="), None);
+    }
+
+    #[test]
+    fn primitive_decoders_do_not_mix_base64_alphabets() {
+        assert_eq!(u8::try_from_base64(b"+w=="), Some(0xfb));
+        assert_eq!(u8::try_from_base64(b"-w=="), None);
+        assert_eq!(u8::try_from_base64url(b"-w=="), Some(0xfb));
+        assert_eq!(u8::try_from_base64url(b"+w=="), None);
+
+        assert_eq!(u8::try_from_base64(b"/w=="), Some(u8::MAX));
+        assert_eq!(u8::try_from_base64(b"_w=="), None);
+        assert_eq!(u8::try_from_base64url(b"_w=="), Some(u8::MAX));
+        assert_eq!(u8::try_from_base64url(b"/w=="), None);
+    }
+
+    #[test]
+    fn trim_base64_end_padding_removes_only_trailing_padding() {
+        assert_eq!(
+            trim_base64_end_padding(Box::from(b"".as_slice())).as_ref(),
+            b""
+        );
+        assert_eq!(
+            trim_base64_end_padding(Box::from(b"Zg==".as_slice())).as_ref(),
+            b"Zg"
+        );
+        assert_eq!(
+            trim_base64_end_padding(Box::from(b"Zm8=".as_slice())).as_ref(),
+            b"Zm8"
+        );
+        assert_eq!(
+            trim_base64_end_padding(Box::from(b"=Zm9v".as_slice())).as_ref(),
+            b"=Zm9v"
+        );
+    }
+}

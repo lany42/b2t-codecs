@@ -81,10 +81,10 @@ impl<'d> Decoder<'d> {
         self.try_decode_base64(base64.as_bytes())
     }
 
-    // extended deocder supports:
+    // extended decoder supports:
     //  - unpadded tails
     //  - concatenated base64 strings
-    //  - skips all-padding chunkks
+    //  - skips all-padding chunks
     fn try_decode_base64ext(&self, base64: &[u8]) -> Option<Box<[u8]>> {
         // empty inputs result in empty outputs
         if base64.is_empty() {
@@ -260,5 +260,349 @@ impl<'d> Decoder<'d> {
             return None;
         }
         Some(byte as u32)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::enc::{encode_base64, encode_base64url};
+    use super::super::{ENCODER, ENCODER_URL};
+    use super::*;
+
+    type Decode = fn(&[u8]) -> Option<Box<[u8]>>;
+
+    fn strict_decoders() -> [(&'static str, Decode); 2] {
+        [
+            ("Base64 strict", try_decode_base64),
+            ("Base64URL strict", try_decode_base64url),
+        ]
+    }
+
+    fn extended_decoders() -> [(&'static str, Decode); 2] {
+        [
+            ("Base64 extended", try_decode_base64ext),
+            ("Base64URL extended", try_decode_base64urlext),
+        ]
+    }
+
+    fn all_decoders() -> [(&'static str, Decode); 4] {
+        [
+            ("Base64 strict", try_decode_base64),
+            ("Base64 extended", try_decode_base64ext),
+            ("Base64URL strict", try_decode_base64url),
+            ("Base64URL extended", try_decode_base64urlext),
+        ]
+    }
+
+    #[test]
+    fn rfc_4648_base64_test_vectors_pin_decoding() {
+        let vectors: &[(&[u8], &str)] = &[
+            (b"", ""),
+            (b"f", "Zg=="),
+            (b"fo", "Zm8="),
+            (b"foo", "Zm9v"),
+            (b"foob", "Zm9vYg=="),
+            (b"fooba", "Zm9vYmE="),
+            (b"foobar", "Zm9vYmFy"),
+        ];
+
+        for &(plain, encoded) in vectors {
+            assert_eq!(
+                try_decode_base64(encoded.as_bytes()).as_deref(),
+                Some(plain)
+            );
+            assert_eq!(try_decode_base64_string(encoded).as_deref(), Some(plain));
+            assert_eq!(
+                try_decode_base64ext(encoded.as_bytes()).as_deref(),
+                Some(plain)
+            );
+            assert_eq!(try_decode_base64ext_string(encoded).as_deref(), Some(plain));
+
+            // These RFC vectors do not use alphabet digits 62 or 63, so they
+            // are valid under the Base64URL alphabet as well.
+            assert_eq!(
+                try_decode_base64url(encoded.as_bytes()).as_deref(),
+                Some(plain)
+            );
+            assert_eq!(try_decode_base64url_string(encoded).as_deref(), Some(plain));
+            assert_eq!(
+                try_decode_base64urlext(encoded.as_bytes()).as_deref(),
+                Some(plain)
+            );
+            assert_eq!(
+                try_decode_base64urlext_string(encoded).as_deref(),
+                Some(plain)
+            );
+        }
+    }
+
+    #[test]
+    fn base64url_decoding_uses_url_safe_alphabet() {
+        let vectors: &[(&[u8], &str, &str)] = &[
+            (&[0xfb], "+w==", "-w=="),
+            (&[0xfb, 0xff], "+/8=", "-_8="),
+            (&[0xfb, 0xff, 0xff], "+///", "-___"),
+        ];
+
+        for &(plain, base64, base64url) in vectors {
+            assert_eq!(try_decode_base64_string(base64).as_deref(), Some(plain));
+            assert_eq!(try_decode_base64ext_string(base64).as_deref(), Some(plain));
+            assert_eq!(
+                try_decode_base64url_string(base64url).as_deref(),
+                Some(plain)
+            );
+            assert_eq!(
+                try_decode_base64urlext_string(base64url).as_deref(),
+                Some(plain)
+            );
+
+            assert_eq!(try_decode_base64(base64url.as_bytes()), None);
+            assert_eq!(try_decode_base64ext(base64url.as_bytes()), None);
+            assert_eq!(try_decode_base64url(base64.as_bytes()), None);
+            assert_eq!(try_decode_base64urlext(base64.as_bytes()), None);
+        }
+    }
+
+    #[test]
+    fn tables_preserve_unsafe_indexing_invariants() {
+        fn assert_invariants(decoder: &Decoder<'_>, encoder: &[u8]) {
+            assert!(decoder.max_ascii > decoder.min_ascii);
+            assert_eq!(decoder.max_ascii - decoder.min_ascii, decoder.decoder.len());
+
+            let mut seen = vec![false; decoder.decoder.len()];
+            for (digit, &ascii) in encoder.iter().enumerate() {
+                let ascii = ascii as usize;
+                assert!((decoder.min_ascii..decoder.max_ascii).contains(&ascii));
+
+                let offset = ascii - decoder.min_ascii;
+                assert!(!seen[offset], "duplicate base64 byte at ASCII {ascii}");
+                seen[offset] = true;
+                assert_eq!(decoder.decoder[offset], digit as u8);
+            }
+
+            for (offset, &digit) in decoder.decoder.iter().enumerate() {
+                if digit == 255 {
+                    continue;
+                }
+
+                assert!((digit as usize) < encoder.len());
+                assert_eq!(encoder[digit as usize] as usize, decoder.min_ascii + offset);
+            }
+        }
+
+        assert_invariants(&BASE64_RFC, &ENCODER);
+        assert_invariants(&BASE64_URL, &ENCODER_URL);
+    }
+
+    #[test]
+    fn byte_slices_of_arbitrary_lengths_roundtrip_through_every_decoder() {
+        for len in 0usize..=64 {
+            let input: Vec<u8> = (0..len)
+                .map(|i| (i.wrapping_mul(73).wrapping_add(len * 19)) as u8)
+                .collect();
+
+            let base64 = encode_base64(&input);
+            assert_eq!(
+                try_decode_base64(&base64).as_deref(),
+                Some(input.as_slice()),
+                "Base64 strict failed to roundtrip {len} data bytes"
+            );
+            assert_eq!(
+                try_decode_base64ext(&base64).as_deref(),
+                Some(input.as_slice()),
+                "Base64 extended failed to roundtrip {len} data bytes"
+            );
+
+            let base64url = encode_base64url(&input);
+            assert_eq!(
+                try_decode_base64url(&base64url).as_deref(),
+                Some(input.as_slice()),
+                "Base64URL strict failed to roundtrip {len} data bytes"
+            );
+            assert_eq!(
+                try_decode_base64urlext(&base64url).as_deref(),
+                Some(input.as_slice()),
+                "Base64URL extended failed to roundtrip {len} data bytes"
+            );
+        }
+    }
+
+    #[test]
+    fn strict_decode_requires_complete_quanta() {
+        for (name, decode) in strict_decoders() {
+            for input in [
+                b"A".as_slice(),
+                b"Zg".as_slice(),
+                b"Zm8".as_slice(),
+                b"AAAAA".as_slice(),
+                b"AAAAAA".as_slice(),
+                b"AAAAAAA".as_slice(),
+            ] {
+                assert_eq!(decode(input), None, "{name} accepted {input:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn every_decoder_rejects_non_zero_pad_bit_aliases() {
+        let padded: &[(&str, &str, &[u8])] = &[("TQ==", "TR==", b"M"), ("TWE=", "TWF=", b"Ma")];
+
+        for (name, decode) in all_decoders() {
+            for &(canonical, alias, plain) in padded {
+                assert_eq!(
+                    decode(canonical.as_bytes()).as_deref(),
+                    Some(plain),
+                    "{name} rejected canonical {canonical:?}"
+                );
+                assert_eq!(
+                    decode(alias.as_bytes()),
+                    None,
+                    "{name} accepted alias {alias:?}"
+                );
+            }
+        }
+
+        let unpadded: &[(&str, &str, &[u8])] = &[("TQ", "TR", b"M"), ("TWE", "TWF", b"Ma")];
+        for (name, decode) in extended_decoders() {
+            for &(canonical, alias, plain) in unpadded {
+                assert_eq!(
+                    decode(canonical.as_bytes()).as_deref(),
+                    Some(plain),
+                    "{name} rejected canonical {canonical:?}"
+                );
+                assert_eq!(
+                    decode(alias.as_bytes()),
+                    None,
+                    "{name} accepted alias {alias:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn strict_decode_rejects_non_terminal_or_malformed_padding() {
+        for (name, decode) in strict_decoders() {
+            for input in [
+                b"====".as_slice(),
+                b"========".as_slice(),
+                b"TQ==TQ==".as_slice(),
+                b"TWE=TWE=".as_slice(),
+                b"=AAA".as_slice(),
+                b"A=AA".as_slice(),
+                b"AA=A".as_slice(),
+                b"A===".as_slice(),
+                b"===A".as_slice(),
+            ] {
+                assert_eq!(decode(input), None, "{name} accepted {input:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn extended_decode_accepts_unpadded_final_quantum() {
+        for (name, decode) in extended_decoders() {
+            for (input, expected) in [("Zg", b"f".as_slice()), ("Zm8", b"fo".as_slice())] {
+                assert_eq!(
+                    decode(input.as_bytes()).as_deref(),
+                    Some(expected),
+                    "{name} rejected {input:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn extended_decode_accepts_padding_only_chunks() {
+        for (name, decode) in extended_decoders() {
+            for input in [b"====".as_slice(), b"========".as_slice()] {
+                assert_eq!(
+                    decode(input).as_deref(),
+                    Some(b"".as_slice()),
+                    "{name} rejected {input:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn extended_decode_treats_padded_quanta_as_concatenated_values() {
+        for (name, decode) in extended_decoders() {
+            for (input, expected) in [
+                ("TQ==TQ==", b"MM".as_slice()),
+                ("TWE=TWE=", b"MaMa".as_slice()),
+                ("TQ======TQ==", b"MM".as_slice()),
+            ] {
+                assert_eq!(
+                    decode(input.as_bytes()).as_deref(),
+                    Some(expected),
+                    "{name} rejected {input:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn extended_decode_rejects_single_ascii_tails() {
+        for (name, decode) in extended_decoders() {
+            for input in [
+                b"A".as_slice(),
+                b"AAAAA".as_slice(),
+                b"AAAAAAAAA".as_slice(),
+            ] {
+                assert_eq!(decode(input), None, "{name} accepted {input:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn extended_decode_rejects_misplaced_or_partial_padding() {
+        for (name, decode) in extended_decoders() {
+            for input in [
+                b"=AAA".as_slice(),
+                b"A=AA".as_slice(),
+                b"AA=A".as_slice(),
+                b"A===".as_slice(),
+                b"===A".as_slice(),
+                b"===".as_slice(),
+                b"AA=".as_slice(),
+                b"A==".as_slice(),
+            ] {
+                assert_eq!(decode(input), None, "{name} accepted {input:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn decoders_reject_every_non_alphabet_byte_in_any_frame() {
+        fn assert_invalid_bytes_rejected(name: &str, decode: Decode, alphabet: &[u8]) {
+            for invalid in u8::MIN..=u8::MAX {
+                if invalid == BASE64_PAD || alphabet.contains(&invalid) {
+                    continue;
+                }
+
+                for position in 0..4 {
+                    let mut input = *b"AAAA";
+                    input[position] = invalid;
+                    assert_eq!(
+                        decode(&input),
+                        None,
+                        "{name} accepted byte {invalid:#04x} at position {position}"
+                    );
+                }
+
+                let mut second_frame = *b"AAAAAAAA";
+                second_frame[6] = invalid;
+                assert_eq!(
+                    decode(&second_frame),
+                    None,
+                    "{name} accepted byte {invalid:#04x} in a later frame"
+                );
+            }
+        }
+
+        assert_invalid_bytes_rejected("Base64 strict", try_decode_base64, &ENCODER);
+        assert_invalid_bytes_rejected("Base64 extended", try_decode_base64ext, &ENCODER);
+        assert_invalid_bytes_rejected("Base64URL strict", try_decode_base64url, &ENCODER_URL);
+        assert_invalid_bytes_rejected("Base64URL extended", try_decode_base64urlext, &ENCODER_URL);
     }
 }

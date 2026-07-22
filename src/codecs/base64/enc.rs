@@ -122,3 +122,116 @@ impl<'e> Encoder<'e> {
         encoded
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    type EncodeBytes = fn(&[u8]) -> Box<[u8]>;
+    type EncodeString = fn(&[u8]) -> String;
+
+    #[test]
+    fn rfc_4648_base64_test_vectors_pin_encoding() {
+        let vectors: &[(&[u8], &str)] = &[
+            (b"", ""),
+            (b"f", "Zg=="),
+            (b"fo", "Zm8="),
+            (b"foo", "Zm9v"),
+            (b"foob", "Zm9vYg=="),
+            (b"fooba", "Zm9vYmE="),
+            (b"foobar", "Zm9vYmFy"),
+        ];
+
+        for &(plain, base64) in vectors {
+            assert_eq!(encode_base64(plain).as_ref(), base64.as_bytes());
+            assert_eq!(encode_base64_string(plain), base64);
+
+            // These RFC vectors do not use alphabet digits 62 or 63, so their
+            // Base64 and Base64URL encodings are identical.
+            assert_eq!(encode_base64url(plain).as_ref(), base64.as_bytes());
+            assert_eq!(encode_base64url_string(plain), base64);
+        }
+    }
+
+    #[test]
+    fn base64url_encoding_uses_url_safe_alphabet() {
+        let vectors: &[(&[u8], &str, &str)] = &[
+            (&[0xfb], "+w==", "-w=="),
+            (&[0xfb, 0xff], "+/8=", "-_8="),
+            (&[0xfb, 0xff, 0xff], "+///", "-___"),
+        ];
+
+        for &(plain, base64, base64url) in vectors {
+            assert_eq!(encode_base64(plain).as_ref(), base64.as_bytes());
+            assert_eq!(encode_base64_string(plain), base64);
+            assert_eq!(encode_base64url(plain).as_ref(), base64url.as_bytes());
+            assert_eq!(encode_base64url_string(plain), base64url);
+        }
+    }
+
+    #[test]
+    fn encoder_alphabets_preserve_unsafe_indexing_and_utf8_invariants() {
+        fn assert_invariants(encoder: &Encoder<'_>) {
+            assert_eq!(encoder.encoder.len(), 64);
+
+            let mut seen = [false; 128];
+            for &ascii in encoder.encoder {
+                assert!(ascii.is_ascii());
+                assert!(!seen[ascii as usize], "duplicate byte at ASCII {ascii}");
+                seen[ascii as usize] = true;
+            }
+        }
+
+        assert_invariants(&BASE64_RFC);
+        assert_invariants(&BASE64_URL);
+    }
+
+    #[test]
+    fn byte_slices_of_arbitrary_lengths_encode_canonically() {
+        let codecs: &[(&str, EncodeBytes, EncodeString, &[u8])] = &[
+            (
+                "Base64",
+                encode_base64,
+                encode_base64_string,
+                BASE64_RFC.encoder,
+            ),
+            (
+                "Base64URL",
+                encode_base64url,
+                encode_base64url_string,
+                BASE64_URL.encoder,
+            ),
+        ];
+
+        for len in 0usize..=64 {
+            let input: Vec<u8> = (0..len)
+                .map(|i| (i.wrapping_mul(73).wrapping_add(len * 19)) as u8)
+                .collect();
+            let padding = match len % 3 {
+                0 => 0,
+                1 => 2,
+                2 => 1,
+                _ => unreachable!(),
+            };
+
+            for &(name, encode, encode_string, alphabet) in codecs {
+                let encoded = encode(&input);
+
+                assert_eq!(encoded.len(), len.div_ceil(3) * 4, "{name}, len {len}");
+                assert_eq!(encode_string(&input).as_bytes(), encoded.as_ref());
+                assert!(
+                    encoded[..encoded.len() - padding]
+                        .iter()
+                        .all(|byte| alphabet.contains(byte)),
+                    "{name} emitted a byte outside its alphabet for len {len}"
+                );
+                assert!(
+                    encoded[encoded.len() - padding..]
+                        .iter()
+                        .all(|&byte| byte == BASE64_PAD),
+                    "{name} emitted malformed padding for len {len}"
+                );
+            }
+        }
+    }
+}
