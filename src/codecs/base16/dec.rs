@@ -1,3 +1,20 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-FileCopyrightText: 2026 Lany Atwood <lany@colorized.life>
+//! Base16 decoders with mixed-case and case-selective validation.
+//!
+//! All decoders require an even number of symbols. The general decoder accepts
+//! mixed case, while the lowercase and uppercase variants reject letters from
+//! the other case.
+//!
+//! ```rust
+//! use b2t_codecs::base16::{try_decode_base16_string, try_decode_base16upper_string};
+//!
+//! assert_eq!(
+//!     try_decode_base16_string("aBcD").as_deref(),
+//!     Some([0xab, 0xcd].as_slice()),
+//! );
+//! assert!(try_decode_base16upper_string("aBcD").is_none());
+//! ```
 const BASE16_MIXED: Decoder = const {
     use super::{DECODER, MAX_ASCII, MIN_ASCII};
     Decoder::from_table(&DECODER, MIN_ASCII, MAX_ASCII)
@@ -11,31 +28,61 @@ const BASE16_UPPER: Decoder = const {
     Decoder::from_table(&DECODER_UPPER, MIN_ASCII_UPPER, MAX_ASCII_UPPER)
 };
 
+/// Decodes a mixed-case Base16 string.
+///
+/// Returns [`None`] if the input has an odd length or contains a non-Base16
+/// character.
+#[must_use = "the decoding result should be handled"]
 #[inline]
 pub fn try_decode_base16_string(base16: &str) -> Option<Box<[u8]>> {
     BASE16_MIXED.try_decode_base16_string(base16)
 }
 
+/// Decodes a lowercase Base16 string.
+///
+/// Returns [`None`] if the input has an odd length or contains any symbol
+/// outside lowercase Base16, including an uppercase letter.
+#[must_use = "the decoding result should be handled"]
 #[inline]
 pub fn try_decode_base16lower_string(base16: &str) -> Option<Box<[u8]>> {
     BASE16_LOWER.try_decode_base16_string(base16)
 }
 
+/// Decodes an uppercase Base16 string.
+///
+/// Returns [`None`] if the input has an odd length or contains any symbol
+/// outside uppercase Base16, including a lowercase letter.
+#[must_use = "the decoding result should be handled"]
 #[inline]
 pub fn try_decode_base16upper_string(base16: &str) -> Option<Box<[u8]>> {
     BASE16_UPPER.try_decode_base16_string(base16)
 }
 
+/// Decodes mixed-case Base16 ASCII bytes.
+///
+/// Returns [`None`] if the input has an odd length or contains a non-Base16
+/// byte.
+#[must_use = "the decoding result should be handled"]
 #[inline]
 pub fn try_decode_base16(base16: &[u8]) -> Option<Box<[u8]>> {
     BASE16_MIXED.try_decode_base16(base16)
 }
 
+/// Decodes lowercase Base16 ASCII bytes.
+///
+/// Returns [`None`] if the input has an odd length or contains any byte outside
+/// lowercase Base16, including an uppercase letter.
+#[must_use = "the decoding result should be handled"]
 #[inline]
 pub fn try_decode_base16lower(base16: &[u8]) -> Option<Box<[u8]>> {
     BASE16_LOWER.try_decode_base16(base16)
 }
 
+/// Decodes uppercase Base16 ASCII bytes.
+///
+/// Returns [`None`] if the input has an odd length or contains any byte outside
+/// uppercase Base16, including a lowercase letter.
+#[must_use = "the decoding result should be handled"]
 #[inline]
 pub fn try_decode_base16upper(base16: &[u8]) -> Option<Box<[u8]>> {
     BASE16_UPPER.try_decode_base16(base16)

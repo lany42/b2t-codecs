@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: AGPL-3.0-only
+# SPDX-FileCopyrightText: 2026 Lany Atwood <lany@colorized.life>
 """Display the precomputed lookup tables used by the codecs.
 
 The output is deliberately close to Rust syntax so that a table can be copied

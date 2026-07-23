@@ -2,5 +2,21 @@
 name = "b2t-codecs"
 version = "1.0.0"
 edition = "2024"
+description = "Freestanding binary-to-text codecs"
+license = "AGPL-3.0-only"
+readme = "README.md"
+repository = "https://git.colorized.life/b2t-codecs"
+keywords = ["base16", "base32", "base64", "base85", "z85"]
+categories = ["encoding"]
+exclude = ["/scripts", "/.gitignore"]
 
 [dependencies]
+
+[profile.dev.package."*"]
+opt-level = 1
+debug = false
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true

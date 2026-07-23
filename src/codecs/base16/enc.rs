@@ -1,3 +1,15 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-FileCopyrightText: 2026 Lany Atwood <lany@colorized.life>
+//! Base16 encoders for lowercase and uppercase ASCII output.
+//!
+//! Each input byte is represented by exactly two hexadecimal symbols.
+//!
+//! ```rust
+//! use b2t_codecs::base16::{encode_base16_string, encode_base16upper_string};
+//!
+//! assert_eq!(encode_base16_string(&[0xab, 0xcd]), "abcd");
+//! assert_eq!(encode_base16upper_string(&[0xab, 0xcd]), "ABCD");
+//! ```
 const BASE16_LOWER: Encoder = const {
     use super::ENCODER_LOWER;
     Encoder::from_alphabet(&ENCODER_LOWER)
@@ -7,21 +19,53 @@ const BASE16_UPPER: Encoder = const {
     Encoder::from_alphabet(&ENCODER_UPPER)
 };
 
+/// Encodes `bytes` as a lowercase Base16 string.
+///
+/// The output contains exactly two ASCII symbols per input byte.
+///
+/// # Panics
+///
+/// Panics if the encoded length cannot be represented as a [`usize`].
+#[must_use = "the encoded value should be used"]
 #[inline]
 pub fn encode_base16_string(bytes: &[u8]) -> String {
     BASE16_LOWER.encode_base16_string(bytes)
 }
 
+/// Encodes `bytes` as an uppercase Base16 string.
+///
+/// The output contains exactly two ASCII symbols per input byte.
+///
+/// # Panics
+///
+/// Panics if the encoded length cannot be represented as a [`usize`].
+#[must_use = "the encoded value should be used"]
 #[inline]
 pub fn encode_base16upper_string(bytes: &[u8]) -> String {
     BASE16_UPPER.encode_base16_string(bytes)
 }
 
+/// Encodes `bytes` as lowercase Base16 ASCII bytes.
+///
+/// The output contains exactly two ASCII symbols per input byte.
+///
+/// # Panics
+///
+/// Panics if the encoded length cannot be represented as a [`usize`].
+#[must_use = "the encoded value should be used"]
 #[inline]
 pub fn encode_base16(bytes: &[u8]) -> Box<[u8]> {
     BASE16_LOWER.encode_base16(bytes)
 }
 
+/// Encodes `bytes` as uppercase Base16 ASCII bytes.
+///
+/// The output contains exactly two ASCII symbols per input byte.
+///
+/// # Panics
+///
+/// Panics if the encoded length cannot be represented as a [`usize`].
+#[must_use = "the encoded value should be used"]
 #[inline]
 pub fn encode_base16upper(bytes: &[u8]) -> Box<[u8]> {
     BASE16_UPPER.encode_base16(bytes)

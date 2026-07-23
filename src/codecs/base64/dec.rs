@@ -1,3 +1,23 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-FileCopyrightText: 2026 Lany Atwood <lany@colorized.life>
+//! Strict and extended Base64 and Base64URL decoders.
+//!
+//! Strict decoding accepts one canonical padded value. Extended decoding also
+//! accepts canonical unpadded final quanta, concatenated padded values, and
+//! padding-only quanta.
+//!
+//! ```rust
+//! use b2t_codecs::base64::{try_decode_base64_string, try_decode_base64ext_string};
+//!
+//! assert_eq!(
+//!     try_decode_base64_string("Zg==").as_deref(),
+//!     Some(b"f".as_slice()),
+//! );
+//! assert_eq!(
+//!     try_decode_base64ext_string("Zg").as_deref(),
+//!     Some(b"f".as_slice()),
+//! );
+//! ```
 use super::BASE64_PAD;
 
 const BASE64_RFC: Decoder = const {
@@ -9,41 +29,85 @@ const BASE64_URL: Decoder = const {
     Decoder::from_table(&DECODER_URL, MIN_ASCII_URL, MAX_ASCII_URL)
 };
 
+/// Decodes a canonical padded Base64 string.
+///
+/// Returns [`None`] unless `base64` uses the standard RFC 4648 alphabet,
+/// complete four-symbol quanta, terminal padding, and zero pad bits.
+#[must_use = "the decoding result should be handled"]
 #[inline]
 pub fn try_decode_base64_string(base64: &str) -> Option<Box<[u8]>> {
     BASE64_RFC.try_decode_base64_string(base64)
 }
 
+/// Decodes a Base64 string using extended framing.
+///
+/// Padded quanta may be concatenated, padding-only quanta are ignored, and the
+/// final quantum may omit padding. Returns [`None`] for an invalid alphabet,
+/// malformed padding, non-zero pad bits, or a one-symbol tail.
+#[must_use = "the decoding result should be handled"]
 #[inline]
 pub fn try_decode_base64ext_string(base64: &str) -> Option<Box<[u8]>> {
     BASE64_RFC.try_decode_base64ext_string(base64)
 }
 
+/// Decodes canonical padded Base64 ASCII bytes.
+///
+/// Returns [`None`] unless `base64` uses the standard RFC 4648 alphabet,
+/// complete four-symbol quanta, terminal padding, and zero pad bits.
+#[must_use = "the decoding result should be handled"]
 #[inline]
 pub fn try_decode_base64(base64: &[u8]) -> Option<Box<[u8]>> {
     BASE64_RFC.try_decode_base64(base64)
 }
 
+/// Decodes Base64 ASCII bytes using extended framing.
+///
+/// Padded quanta may be concatenated, padding-only quanta are ignored, and the
+/// final quantum may omit padding. Returns [`None`] for an invalid alphabet,
+/// malformed padding, non-zero pad bits, or a one-symbol tail.
+#[must_use = "the decoding result should be handled"]
 #[inline]
 pub fn try_decode_base64ext(base64: &[u8]) -> Option<Box<[u8]>> {
     BASE64_RFC.try_decode_base64ext(base64)
 }
 
+/// Decodes a canonical padded Base64URL string.
+///
+/// Returns [`None`] unless `base64` uses the RFC 4648 URL-safe alphabet,
+/// complete four-symbol quanta, terminal padding, and zero pad bits.
+#[must_use = "the decoding result should be handled"]
 #[inline]
 pub fn try_decode_base64url_string(base64: &str) -> Option<Box<[u8]>> {
     BASE64_URL.try_decode_base64_string(base64)
 }
 
+/// Decodes a Base64URL string using extended framing.
+///
+/// Padded quanta may be concatenated, padding-only quanta are ignored, and the
+/// final quantum may omit padding. Returns [`None`] for an invalid URL-safe
+/// alphabet, malformed padding, non-zero pad bits, or a one-symbol tail.
+#[must_use = "the decoding result should be handled"]
 #[inline]
 pub fn try_decode_base64urlext_string(base64: &str) -> Option<Box<[u8]>> {
     BASE64_URL.try_decode_base64ext_string(base64)
 }
 
+/// Decodes canonical padded Base64URL ASCII bytes.
+///
+/// Returns [`None`] unless `base64` uses the RFC 4648 URL-safe alphabet,
+/// complete four-symbol quanta, terminal padding, and zero pad bits.
+#[must_use = "the decoding result should be handled"]
 #[inline]
 pub fn try_decode_base64url(base64: &[u8]) -> Option<Box<[u8]>> {
     BASE64_URL.try_decode_base64(base64)
 }
 
+/// Decodes Base64URL ASCII bytes using extended framing.
+///
+/// Padded quanta may be concatenated, padding-only quanta are ignored, and the
+/// final quantum may omit padding. Returns [`None`] for an invalid URL-safe
+/// alphabet, malformed padding, non-zero pad bits, or a one-symbol tail.
+#[must_use = "the decoding result should be handled"]
 #[inline]
 pub fn try_decode_base64urlext(base64: &[u8]) -> Option<Box<[u8]>> {
     BASE64_URL.try_decode_base64ext(base64)
@@ -152,7 +216,7 @@ impl<'d> Decoder<'d> {
         // whole chunks
         // padding characters are malformed here
         for &chunk in chunks {
-            ret.extend_from_slice(&self.decode_base64_full_chunk(chunk)?)
+            ret.extend_from_slice(&self.decode_base64_full_chunk(chunk)?);
         }
 
         // handle padding at the tail
@@ -198,7 +262,7 @@ impl<'d> Decoder<'d> {
         let on = self.check_and_decode_b64_byte(on)?;
         let tw = self.check_and_decode_b64_byte(tw)?;
 
-        // Only the top two bits of the second sextet carry data.
+        // Only the top two bits of the second hexad carry data.
         if tw & 0x0f != 0 {
             return None;
         }
@@ -206,6 +270,7 @@ impl<'d> Decoder<'d> {
         let n = on << 18 | tw << 12;
 
         // return one byte only: [0, x, _, _]
+        #[allow(clippy::cast_possible_truncation)]
         Some((n >> 16) as u8)
     }
 
@@ -217,7 +282,7 @@ impl<'d> Decoder<'d> {
         let tw = self.check_and_decode_b64_byte(tw)?;
         let th = self.check_and_decode_b64_byte(th)?;
 
-        // Only the top four bits of the third sextet carry data.
+        // Only the top four bits of the third hexad carry data.
         if th & 0x03 != 0 {
             return None;
         }
@@ -259,7 +324,7 @@ impl<'d> Decoder<'d> {
             // byte is not encoded base64
             return None;
         }
-        Some(byte as u32)
+        Some(u32::from(byte))
     }
 }
 

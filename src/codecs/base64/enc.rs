@@ -1,3 +1,16 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-FileCopyrightText: 2026 Lany Atwood <lany@colorized.life>
+//! Canonical padded Base64 and Base64URL encoders.
+//!
+//! The Base64URL variant substitutes `-` and `_` for the standard alphabet's
+//! `+` and `/`; both variants retain RFC 4648 end padding.
+//!
+//! ```rust
+//! use b2t_codecs::base64::{encode_base64_string, encode_base64url_string};
+//!
+//! assert_eq!(encode_base64_string(&[0xfb, 0xff]), "+/8=");
+//! assert_eq!(encode_base64url_string(&[0xfb, 0xff]), "-_8=");
+//! ```
 use super::BASE64_PAD;
 
 const BASE64_RFC: Encoder = const {
@@ -9,21 +22,45 @@ const BASE64_URL: Encoder = const {
     Encoder::from_alphabet(&ENCODER_URL)
 };
 
+/// Encodes `bytes` as a canonical padded Base64 string.
+///
+/// # Panics
+///
+/// Panics if the encoded length cannot be represented as a [`usize`].
+#[must_use = "the encoded value should be used"]
 #[inline]
 pub fn encode_base64_string(bytes: &[u8]) -> String {
     BASE64_RFC.encode_base64_string(bytes)
 }
 
+/// Encodes `bytes` as a canonical padded Base64URL string.
+///
+/// # Panics
+///
+/// Panics if the encoded length cannot be represented as a [`usize`].
+#[must_use = "the encoded value should be used"]
 #[inline]
 pub fn encode_base64url_string(bytes: &[u8]) -> String {
     BASE64_URL.encode_base64_string(bytes)
 }
 
+/// Encodes `bytes` as canonical padded Base64 ASCII bytes.
+///
+/// # Panics
+///
+/// Panics if the encoded length cannot be represented as a [`usize`].
+#[must_use = "the encoded value should be used"]
 #[inline]
 pub fn encode_base64(bytes: &[u8]) -> Box<[u8]> {
     BASE64_RFC.encode_base64(bytes)
 }
 
+/// Encodes `bytes` as canonical padded Base64URL ASCII bytes.
+///
+/// # Panics
+///
+/// Panics if the encoded length cannot be represented as a [`usize`].
+#[must_use = "the encoded value should be used"]
 #[inline]
 pub fn encode_base64url(bytes: &[u8]) -> Box<[u8]> {
     BASE64_URL.encode_base64(bytes)
@@ -82,20 +119,20 @@ impl<'e> Encoder<'e> {
         // pack each byte into a u32
         let n = u32::from_be_bytes([0, chunk[0], chunk[1], chunk[2]]);
 
-        // the four 6-bit sextets
+        // the four 6-bit hexads
         let on = n >> 18 & 0x3f; // Not required, but ensures safe indexing if n isn't initialized to zero.
         let tw = n >> 12 & 0x3f;
         let th = n >> 6 & 0x3f;
         let fo = n & 0x3f;
 
         // the four encoded bytes
-        // SAFETY: six-bit sextet 3F is guaranteed to be on the range [0, 64)
+        // SAFETY: six-bit hexad 3F is guaranteed to be on the range [0, 64)
         let on = unsafe { *self.encoder.get_unchecked(on as usize) };
-        // SAFETY: six-bit sextet 3F is guaranteed to be on the range [0, 64)
+        // SAFETY: six-bit hexad 3F is guaranteed to be on the range [0, 64)
         let tw = unsafe { *self.encoder.get_unchecked(tw as usize) };
-        // SAFETY: six-bit sextet 3F is guaranteed to be on the range [0, 64)
+        // SAFETY: six-bit hexad 3F is guaranteed to be on the range [0, 64)
         let th = unsafe { *self.encoder.get_unchecked(th as usize) };
-        // SAFETY: six-bit sextet 3F is guaranteed to be on the range [0, 64)
+        // SAFETY: six-bit hexad 3F is guaranteed to be on the range [0, 64)
         let fo = unsafe { *self.encoder.get_unchecked(fo as usize) };
 
         [on, tw, th, fo]
@@ -115,9 +152,7 @@ impl<'e> Encoder<'e> {
         //      - 1 byte  => two encoded bytes and two pad bytes
         //      - 2 bytes => three encoded bytes and single pad byte
         // That is, N_PAD_START = len + 1
-        for b in encoded[len + 1..].iter_mut() {
-            *b = BASE64_PAD;
-        }
+        encoded[len + 1..].fill(BASE64_PAD);
 
         encoded
     }

@@ -1,3 +1,21 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-FileCopyrightText: 2026 Lany Atwood <lany@colorized.life>
+//! Canonical RFC 4648 Base64 and Base64URL codecs.
+//!
+//! Encoders emit padded ASCII. Strict decoders require complete quanta and
+//! terminal canonical padding; extended decoders additionally accept unpadded
+//! tails, concatenated padded values, and padding-only quanta.
+//!
+//! ```rust
+//! use b2t_codecs::base64::{encode_base64url_string, try_decode_base64url_string};
+//!
+//! let encoded = encode_base64url_string(&[0xfb, 0xff]);
+//! assert_eq!(encoded, "-_8=");
+//! assert_eq!(
+//!     try_decode_base64url_string(&encoded).as_deref(),
+//!     Some([0xfb, 0xff].as_slice()),
+//! );
+//! ```
 // BASE64 CODEC
 // Canonical RFC 4648 Base64 and Base64URL codecs. Strict decoders reject
 // non-zero pad-bit aliases, missing padding, and malformed inputs; extended
@@ -54,6 +72,11 @@ const MAX_ASCII_URL: usize = 122 + 1; // Exclusive; one past the end.
 
 const BASE64_PAD: u8 = b'=';
 
+/// Removes every trailing Base64 padding byte (`=`).
+///
+/// This function does not validate the input and leaves non-trailing bytes
+/// unchanged.
+#[must_use = "the unpadded value should be used"]
 #[inline]
 pub fn trim_base64_end_padding(bytes: Box<[u8]>) -> Box<[u8]> {
     let mut bytes = bytes.into_vec();
@@ -68,24 +91,65 @@ pub fn trim_base64_end_padding(bytes: Box<[u8]>) -> Box<[u8]> {
 }
 
 mod sealed {
+    /// Prevents downstream implementations of the public conversion traits.
     pub trait Sealed {}
 }
 
+/// Converts fixed-width integers to and from canonical RFC 4648 Base64.
+///
+/// This sealed trait is implemented for every signed and unsigned primitive
+/// integer type. Values are encoded from their big-endian bytes at their full
+/// type width.
 pub trait Base64: sealed::Sealed + Copy {
+    /// Returns the padded Base64 encoding of this value.
+    #[must_use = "the encoded value should be used"]
     fn as_base64_string(&self) -> String;
 
+    /// Returns the padded Base64 ASCII bytes for this value.
+    #[must_use = "the encoded value should be used"]
     fn as_base64(&self) -> Box<[u8]>;
 
+    /// Decodes a canonical Base64 string into a value of exactly this type's width.
+    ///
+    /// Returns [`None`] if `base64_str` is malformed, non-canonical, or decodes
+    /// to the wrong number of bytes.
+    #[must_use = "the decoding result should be handled"]
     fn try_from_base64_string(base64_str: &str) -> Option<Self>;
+
+    /// Decodes canonical Base64 ASCII into a value of exactly this type's width.
+    ///
+    /// Returns [`None`] if `base64` is malformed, non-canonical, or decodes to
+    /// the wrong number of bytes.
+    #[must_use = "the decoding result should be handled"]
     fn try_from_base64(base64: &[u8]) -> Option<Self>;
 }
 
+/// Converts fixed-width integers to and from canonical RFC 4648 Base64URL.
+///
+/// This sealed trait is implemented for every signed and unsigned primitive
+/// integer type. Values are encoded from their big-endian bytes at their full
+/// type width.
 pub trait Base64Url: sealed::Sealed + Copy {
+    /// Returns the padded Base64URL encoding of this value.
+    #[must_use = "the encoded value should be used"]
     fn as_base64url_string(&self) -> String;
 
+    /// Returns the padded Base64URL ASCII bytes for this value.
+    #[must_use = "the encoded value should be used"]
     fn as_base64url(&self) -> Box<[u8]>;
 
+    /// Decodes a canonical Base64URL string into a value of this type's width.
+    ///
+    /// Returns [`None`] if `base64_str` is malformed, non-canonical, or decodes
+    /// to the wrong number of bytes.
+    #[must_use = "the decoding result should be handled"]
     fn try_from_base64url_string(base64_str: &str) -> Option<Self>;
+
+    /// Decodes canonical Base64URL ASCII into a value of this type's width.
+    ///
+    /// Returns [`None`] if `base64` is malformed, non-canonical, or decodes to
+    /// the wrong number of bytes.
+    #[must_use = "the decoding result should be handled"]
     fn try_from_base64url(base64: &[u8]) -> Option<Self>;
 }
 

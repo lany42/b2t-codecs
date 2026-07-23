@@ -1,3 +1,23 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-FileCopyrightText: 2026 Lany Atwood <lany@colorized.life>
+//! Decoders for strict ASCII85, Adobe85, and ZeroMQ Z85.
+//!
+//! Strict ASCII85 and Z85 require complete five-symbol input quanta. Adobe85
+//! additionally recognizes `z` as a compressed zero quantum and decodes
+//! two-to-four-symbol final quanta using implicit padding.
+//!
+//! ```rust
+//! use b2t_codecs::base85::{try_decode_adobe85_string, try_decode_z85_string};
+//!
+//! assert_eq!(
+//!     try_decode_adobe85_string("z").as_deref(),
+//!     Some([0, 0, 0, 0].as_slice()),
+//! );
+//! assert_eq!(
+//!     try_decode_z85_string("Hello").as_deref(),
+//!     Some([0x86, 0x4f, 0xd2, 0x6f].as_slice()),
+//! );
+//! ```
 const ASCII85: Decoder = const {
     use super::{DECODER_ASCII85, MAX_ASCII_ASCII85, MIN_ASCII_ASCII85};
     Decoder::from_table(&DECODER_ASCII85, MIN_ASCII_ASCII85, MAX_ASCII_ASCII85)
@@ -7,31 +27,63 @@ const Z85: Decoder = const {
     Decoder::from_table(&DECODER_Z85, MIN_ASCII_Z85, MAX_ASCII_Z85)
 };
 
+/// Decodes a raw Adobe85 string.
+///
+/// The decoder accepts compressed zero quanta and implicit final padding but
+/// not Adobe delimiters or whitespace. Returns [`None`] if the input is
+/// malformed or a decoded quantum exceeds [`u32::MAX`].
+#[must_use = "the decoding result should be handled"]
 #[inline]
 pub fn try_decode_adobe85_string(adobe85: &str) -> Option<Box<[u8]>> {
     ASCII85.try_decode_base85ext_string(adobe85, super::ADOBE85_ZEROS, super::ADOBE85_DEC_PAD)
 }
 
+/// Decodes raw Adobe85 ASCII bytes.
+///
+/// The decoder accepts compressed zero quanta and implicit final padding but
+/// not Adobe delimiters or whitespace. Returns [`None`] if the input is
+/// malformed or a decoded quantum exceeds [`u32::MAX`].
+#[must_use = "the decoding result should be handled"]
 #[inline]
 pub fn try_decode_adobe85(adobe85: &[u8]) -> Option<Box<[u8]>> {
     ASCII85.try_decode_base85ext(adobe85, super::ADOBE85_ZEROS, super::ADOBE85_DEC_PAD)
 }
 
+/// Decodes a strict ASCII85 string.
+///
+/// Returns [`None`] unless `ascii85` consists of complete five-symbol ASCII85
+/// quanta whose decoded values fit in a [`u32`].
+#[must_use = "the decoding result should be handled"]
 #[inline]
 pub fn try_decode_ascii85_string(ascii85: &str) -> Option<Box<[u8]>> {
     ASCII85.try_decode_base85_string(ascii85)
 }
 
+/// Decodes strict ASCII85 bytes.
+///
+/// Returns [`None`] unless `ascii85` consists of complete five-symbol ASCII85
+/// quanta whose decoded values fit in a [`u32`].
+#[must_use = "the decoding result should be handled"]
 #[inline]
 pub fn try_decode_ascii85(ascii85: &[u8]) -> Option<Box<[u8]>> {
     ASCII85.try_decode_base85(ascii85)
 }
 
+/// Decodes a ZeroMQ Z85 string.
+///
+/// Returns [`None`] unless `z85` consists of complete five-symbol Z85 quanta
+/// whose decoded values fit in a [`u32`].
+#[must_use = "the decoding result should be handled"]
 #[inline]
 pub fn try_decode_z85_string(z85: &str) -> Option<Box<[u8]>> {
     Z85.try_decode_base85_string(z85)
 }
 
+/// Decodes ZeroMQ Z85 bytes.
+///
+/// Returns [`None`] unless `z85` consists of complete five-symbol Z85 quanta
+/// whose decoded values fit in a [`u32`].
+#[must_use = "the decoding result should be handled"]
 #[inline]
 pub fn try_decode_z85(z85: &[u8]) -> Option<Box<[u8]>> {
     Z85.try_decode_base85(z85)
@@ -197,7 +249,7 @@ impl<'d> Decoder<'d> {
             return None;
         }
 
-        Some(digit as u32)
+        Some(u32::from(digit))
     }
 }
 

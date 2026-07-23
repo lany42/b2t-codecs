@@ -1,3 +1,23 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-FileCopyrightText: 2026 Lany Atwood <lany@colorized.life>
+//! ASCII85, Adobe85, and ZeroMQ Z85 codecs.
+//!
+//! The strict ASCII85 and Z85 functions operate on complete four-byte and
+//! five-symbol quanta. Adobe85 accepts arbitrary byte lengths, compresses full
+//! zero quanta as `z`, and represents a final partial quantum without explicit
+//! padding. These APIs read and write raw payloads without Adobe delimiters.
+//!
+//! ```rust
+//! use b2t_codecs::base85::{try_decode_z85_string, try_encode_z85_string};
+//!
+//! let bytes = [0x86, 0x4f, 0xd2, 0x6f, 0xb5, 0x59, 0xf7, 0x5b];
+//! let encoded = try_encode_z85_string(&bytes).expect("complete four-byte quanta");
+//! assert_eq!(encoded, "HelloWorld");
+//! assert_eq!(
+//!     try_decode_z85_string(&encoded).as_deref(),
+//!     Some(bytes.as_slice()),
+//! );
+//! ```
 // BASE85 CODEC
 // Base85 encoding and decoding shared by the ASCII85, Adobe85, and Z85 APIs.
 // ASCII85 and Z85 use the strict path; Adobe85 adds zero compression and implicit tails.
@@ -69,33 +89,104 @@ const ADOBE85_ZEROS: u8 = b'z';
 const ADOBE85_DEC_PAD: u8 = b'u';
 
 mod sealed {
+    /// Prevents downstream implementations of the public conversion traits.
     pub trait Sealed {}
 }
 
+/// Converts fixed-width integers to and from Adobe-style ASCII85.
+///
+/// This sealed trait is implemented for every signed and unsigned primitive
+/// integer type. Values use their big-endian byte representation. Encodings are
+/// raw payloads without `<~` and `~>` delimiters.
 pub trait Adobe85: sealed::Sealed + Copy {
+    /// Returns the Adobe85 encoding of this value.
+    #[must_use = "the encoded value should be used"]
     fn as_adobe85_string(&self) -> String;
 
+    /// Returns the Adobe85 ASCII bytes for this value.
+    #[must_use = "the encoded value should be used"]
     fn as_adobe85(&self) -> Box<[u8]>;
 
+    /// Decodes an Adobe85 string into a value of exactly this type's width.
+    ///
+    /// Returns [`None`] if `adobe85_str` is malformed or decodes to the wrong
+    /// number of bytes.
+    #[must_use = "the decoding result should be handled"]
     fn try_from_adobe85_string(adobe85_str: &str) -> Option<Self>;
+
+    /// Decodes Adobe85 ASCII into a value of exactly this type's width.
+    ///
+    /// Returns [`None`] if `adobe85` is malformed or decodes to the wrong
+    /// number of bytes.
+    #[must_use = "the decoding result should be handled"]
     fn try_from_adobe85(adobe85: &[u8]) -> Option<Self>;
 }
 
+/// Converts four-byte-aligned fixed-width integers to and from ZeroMQ Z85.
+///
+/// This sealed trait is implemented for `u32`, `u64`, `u128`, `i32`, `i64`,
+/// and `i128`. Values use their big-endian byte representation.
 pub trait Z85: sealed::Sealed + Copy {
+    /// Returns the Z85 encoding of this value.
+    ///
+    /// Returns [`None`] if the value's byte width is not a complete four-byte
+    /// quantum.
+    #[must_use = "the encoding result should be handled"]
     fn as_z85_string(&self) -> Option<String>;
 
+    /// Returns the Z85 ASCII bytes for this value.
+    ///
+    /// Returns [`None`] if the value's byte width is not a complete four-byte
+    /// quantum.
+    #[must_use = "the encoding result should be handled"]
     fn as_z85(&self) -> Option<Box<[u8]>>;
 
+    /// Decodes a Z85 string into a value of exactly this type's width.
+    ///
+    /// Returns [`None`] if `z85_str` is malformed or has the wrong encoded
+    /// width.
+    #[must_use = "the decoding result should be handled"]
     fn try_from_z85_string(z85_str: &str) -> Option<Self>;
+
+    /// Decodes Z85 ASCII into a value of exactly this type's width.
+    ///
+    /// Returns [`None`] if `z85` is malformed or has the wrong encoded width.
+    #[must_use = "the decoding result should be handled"]
     fn try_from_z85(z85: &[u8]) -> Option<Self>;
 }
 
+/// Converts four-byte-aligned fixed-width integers to and from strict ASCII85.
+///
+/// This sealed trait is implemented for `u32`, `u64`, `u128`, `i32`, `i64`,
+/// and `i128`. Values use their big-endian byte representation. Unlike
+/// [`Adobe85`], this format does not compress zero quanta or accept partial
+/// quanta.
 pub trait Base85: sealed::Sealed + Copy {
+    /// Returns the strict ASCII85 encoding of this value.
+    ///
+    /// Returns [`None`] if the value's byte width is not a complete four-byte
+    /// quantum.
+    #[must_use = "the encoding result should be handled"]
     fn as_base85_string(&self) -> Option<String>;
 
+    /// Returns the strict ASCII85 bytes for this value.
+    ///
+    /// Returns [`None`] if the value's byte width is not a complete four-byte
+    /// quantum.
+    #[must_use = "the encoding result should be handled"]
     fn as_base85(&self) -> Option<Box<[u8]>>;
 
+    /// Decodes a strict ASCII85 string into a value of this type's exact width.
+    ///
+    /// Returns [`None`] if `base85_str` is malformed or has the wrong encoded
+    /// width.
+    #[must_use = "the decoding result should be handled"]
     fn try_from_base85_string(base85_str: &str) -> Option<Self>;
+
+    /// Decodes strict ASCII85 into a value of exactly this type's width.
+    ///
+    /// Returns [`None`] if `base85` is malformed or has the wrong encoded width.
+    #[must_use = "the decoding result should be handled"]
     fn try_from_base85(base85: &[u8]) -> Option<Self>;
 }
 

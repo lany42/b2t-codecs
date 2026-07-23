@@ -1,3 +1,21 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-FileCopyrightText: 2026 Lany Atwood <lany@colorized.life>
+//! Base16 encoding, decoding, and fixed-width integer conversions.
+//!
+//! The default encoder emits lowercase ASCII. The general decoder accepts
+//! lowercase, uppercase, or mixed-case input, while the case-specific decoders
+//! accept only their selected letter case.
+//!
+//! ```rust
+//! use b2t_codecs::base16::{encode_base16_string, try_decode_base16_string};
+//!
+//! let encoded = encode_base16_string(b"\xde\xad\xbe\xef");
+//! assert_eq!(encoded, "deadbeef");
+//! assert_eq!(
+//!     try_decode_base16_string("dEaDbEeF").as_deref(),
+//!     Some([0xde, 0xad, 0xbe, 0xef].as_slice()),
+//! );
+//! ```
 // BASE16 CODEC
 // The default encoder emits lowercase ASCII, while the default decoder accepts
 // lowercase, uppercase, or mixed-case input. Case-specific decoders are strict.
@@ -53,15 +71,35 @@ const MIN_ASCII_UPPER: usize = 48;
 const MAX_ASCII_UPPER: usize = 70 + 1; // Exclusive; one past the end.
 
 mod sealed {
+    /// Prevents downstream implementations of the public conversion trait.
     pub trait Sealed {}
 }
 
+/// Converts fixed-width integers to and from Base16.
+///
+/// This sealed trait is implemented for every signed and unsigned primitive
+/// integer type. Values are encoded from their big-endian bytes at their full
+/// type width.
 pub trait Base16: sealed::Sealed + Copy {
+    /// Returns the lowercase Base16 encoding of this value.
+    #[must_use = "the encoded value should be used"]
     fn as_base16_string(&self) -> String;
 
+    /// Returns the lowercase Base16 ASCII bytes for this value.
+    #[must_use = "the encoded value should be used"]
     fn as_base16(&self) -> Box<[u8]>;
 
+    /// Decodes a mixed-case Base16 string into a value of exactly this type's width.
+    ///
+    /// Returns [`None`] if `base16_str` is malformed or has the wrong encoded
+    /// width.
+    #[must_use = "the decoding result should be handled"]
     fn try_from_base16_string(base16_str: &str) -> Option<Self>;
+
+    /// Decodes mixed-case Base16 ASCII into a value of exactly this type's width.
+    ///
+    /// Returns [`None`] if `base16` is malformed or has the wrong encoded width.
+    #[must_use = "the decoding result should be handled"]
     fn try_from_base16(base16: &[u8]) -> Option<Self>;
 }
 

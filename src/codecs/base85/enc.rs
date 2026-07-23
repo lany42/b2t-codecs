@@ -1,3 +1,20 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-FileCopyrightText: 2026 Lany Atwood <lany@colorized.life>
+//! Encoders for strict ASCII85, Adobe85, and ZeroMQ Z85.
+//!
+//! Strict ASCII85 and Z85 require complete four-byte input quanta. Adobe85
+//! accepts partial final quanta and compresses each full all-zero quantum as
+//! `z`.
+//!
+//! ```rust
+//! use b2t_codecs::base85::{encode_adobe85_string, try_encode_z85_string};
+//!
+//! assert_eq!(encode_adobe85_string(&[0, 0, 0, 0]), "z");
+//! assert_eq!(
+//!     try_encode_z85_string(&[0x86, 0x4f, 0xd2, 0x6f]).as_deref(),
+//!     Some("Hello"),
+//! );
+//! ```
 const ASCII85: Encoder = const {
     use super::ENCODER_ASCII85;
     Encoder::from_alphabet(&ENCODER_ASCII85)
@@ -7,31 +24,69 @@ const Z85: Encoder = const {
     Encoder::from_alphabet(&ENCODER_Z85)
 };
 
+/// Encodes `bytes` as a raw Adobe85 string.
+///
+/// Full zero quanta are compressed as `z`, and a final partial quantum uses
+/// implicit padding. The output does not include `<~` and `~>` delimiters.
+///
+/// # Panics
+///
+/// Panics if the encoded length cannot be represented as a [`usize`].
+#[must_use = "the encoded value should be used"]
 #[inline]
 pub fn encode_adobe85_string(bytes: &[u8]) -> String {
     ASCII85.encode_base85ext_string(bytes, super::ADOBE85_ZEROS)
 }
 
+/// Encodes `bytes` as raw Adobe85 ASCII bytes.
+///
+/// Full zero quanta are compressed as `z`, and a final partial quantum uses
+/// implicit padding. The output does not include `<~` and `~>` delimiters.
+///
+/// # Panics
+///
+/// Panics if the encoded length cannot be represented as a [`usize`].
+#[must_use = "the encoded value should be used"]
 #[inline]
 pub fn encode_adobe85(bytes: &[u8]) -> Box<[u8]> {
     ASCII85.encode_base85ext(bytes, super::ADOBE85_ZEROS)
 }
 
+/// Encodes complete four-byte quanta as a strict ASCII85 string.
+///
+/// Returns [`None`] if `bytes.len()` is not divisible by four or the encoded
+/// length cannot be represented as a [`usize`].
+#[must_use = "the encoding result should be handled"]
 #[inline]
 pub fn try_encode_ascii85_string(bytes: &[u8]) -> Option<String> {
     ASCII85.try_encode_base85_string(bytes)
 }
 
+/// Encodes complete four-byte quanta as strict ASCII85 bytes.
+///
+/// Returns [`None`] if `bytes.len()` is not divisible by four or the encoded
+/// length cannot be represented as a [`usize`].
+#[must_use = "the encoding result should be handled"]
 #[inline]
 pub fn try_encode_ascii85(bytes: &[u8]) -> Option<Box<[u8]>> {
     ASCII85.try_encode_base85(bytes)
 }
 
+/// Encodes complete four-byte quanta as a ZeroMQ Z85 string.
+///
+/// Returns [`None`] if `bytes.len()` is not divisible by four or the encoded
+/// length cannot be represented as a [`usize`].
+#[must_use = "the encoding result should be handled"]
 #[inline]
 pub fn try_encode_z85_string(bytes: &[u8]) -> Option<String> {
     Z85.try_encode_base85_string(bytes)
 }
 
+/// Encodes complete four-byte quanta as ZeroMQ Z85 bytes.
+///
+/// Returns [`None`] if `bytes.len()` is not divisible by four or the encoded
+/// length cannot be represented as a [`usize`].
+#[must_use = "the encoding result should be handled"]
 #[inline]
 pub fn try_encode_z85(bytes: &[u8]) -> Option<Box<[u8]>> {
     Z85.try_encode_base85(bytes)
@@ -108,11 +163,11 @@ impl<'e> Encoder<'e> {
         let mut ret = Vec::<u8>::with_capacity(capacity);
         let (chunks, remainder) = bytes.as_chunks::<4>();
 
-        for &chunk in chunks.iter() {
-            if chunk != [0; 4] {
-                ret.extend_from_slice(&self.encode_base85_chunk(chunk));
-            } else {
+        for &chunk in chunks {
+            if chunk == [0; 4] {
                 ret.push(zeros_byte);
+            } else {
+                ret.extend_from_slice(&self.encode_base85_chunk(chunk));
             }
         }
 
@@ -132,7 +187,7 @@ impl<'e> Encoder<'e> {
 
         // "The five characters SHALL be output from most significant to least significant (big endian)."
         let mut d = 85u32.pow(4);
-        for b in buf.iter_mut() {
+        for b in &mut buf {
             let i = ((n / d) % 85) as usize;
 
             // SAFETY: mod 85 gaurentees safe encoder indexing
@@ -160,7 +215,7 @@ impl<'e> Encoder<'e> {
         //
         // that is, bytes kept: remainder.len() + 1
         let encoded = self.encode_base85_chunk(padded);
-        ret.extend_from_slice(&encoded[..len + 1]);
+        ret.extend_from_slice(&encoded[..=len]);
     }
 }
 
