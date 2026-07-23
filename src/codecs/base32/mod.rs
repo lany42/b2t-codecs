@@ -9,12 +9,11 @@
 //! ```rust
 //! use b2t_codecs::base32::{encode_base32_string, try_decode_base32_string};
 //!
-//! let encoded = encode_base32_string(b"foo");
-//! assert_eq!(encoded, "MZXW6===");
-//! assert_eq!(
-//!     try_decode_base32_string(&encoded).as_deref(),
-//!     Some(b"foo".as_slice()),
-//! );
+//! let encoded = encode_base32_string(b"Hello,World!");
+//! assert_eq!(encoded, "JBSWY3DPFRLW64TMMQQQ====");
+//!
+//! let decoded = &*try_decode_base32_string(&encoded).unwrap();
+//! assert_eq!(decoded, b"Hello,World!");
 //! ```
 // BASE32 CODEC
 // Canonical RFC 4648 Base32 and Base32Hex codecs. Strict decoders reject

@@ -1,7 +1,6 @@
 # b2t-codecs
 
-Dependency-free binary-to-text codecs for Base16, Base32, Base64, ASCII85,
-Adobe85, and Z85.
+Freestanding binary-to-text codecs for Base16, Base32, Base64, and Base85.
 
 ## Quick Start
 
@@ -10,41 +9,45 @@ use b2t_codecs::{encode_base64_string, try_decode_base64_string};
 
 let encoded = encode_base64_string(b"Rust is great!");
 assert_eq!(encoded, "UnVzdCBpcyBncmVhdCE=");
-assert_eq!(
-    try_decode_base64_string(&encoded).as_deref(),
-    Some(b"Rust is great!".as_slice()),
-);
+
+let decoded = &*try_decode_base64_string(&encoded).unwrap();
+assert_eq!(decoded, b"Rust is great!");
 ```
 
-## Codec Matrix
+## Codecs
 
-| Codec | Size cost for full quanta | Use-case keywords |
-|---|---:|---|
-| Base16 | 2.00× (100% larger) | human-readable bytes, debugging, checksums, identifiers |
-| Base32 | 1.60× (60% larger) | human transcription, case-insensitive systems, URI-friendly tokens, uncommon protocols |
-| Base32Hex | 1.60× (60% larger) | sortable encodings, numeric-looking identifiers, DNS-style data |
-| Base64 | 1.33× (33% larger) | web APIs, JSON payloads, MIME, general binary transport |
-| Base64URL | 1.33× (33% larger) | URLs, filenames, cookies, web tokens |
-| ASCII85 | 1.25× (25% larger) | compact printable data, ASCII85 interoperability, controlled text formats |
-| Adobe85 | about 1.25× (25% larger) | PostScript-style data, partial tails, zero-heavy data |
-| Z85 | 1.25× (25% larger) | ZeroMQ, source-code literals, JSON and configuration strings |
+### Which do I Choose?
 
-The ratios compare encoded ASCII bytes with input bytes for complete encoding
-quanta. Padding and partial tails can increase the ratio for short inputs.
-Adobe85 can be smaller for zero-heavy input because one `z` represents a full
-four-byte zero quantum.
+Choose based on where the encoded string will live:
 
-Base32 and Base64URL use URI-friendly alphabets, but this crate's encoders emit
-RFC padding where required. The `=` padding byte may still require escaping in
-some URI components. [`trim_base64_end_padding`] removes Base64 or Base64URL end
-padding when the surrounding protocol permits unpadded data.
+- For easy inspection or transcription, use Base16 or Base32.
+- For broadly interoperable binary text, use Base64.
+- For URL tokens and filenames, use Base64URL.
+- For denser JSON, YAML, or TOML strings, use Z85.
 
-Strict ASCII85 and Z85 require input lengths divisible by four and encoded
-lengths divisible by five. Adobe85 accepts partial final quanta. Unlike
-ASCII85, Z85 avoids quote and backslash characters, making it convenient inside
-source-code and JSON strings.
+| Codec | Size | URL | JSON | XML | YAML | TOML | HTML |
+|---|---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| Base16 | 2.00× | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Base32 | 1.60× | ✅* | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Base32Hex | 1.60× | ✅* | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Base64 | 1.33× | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Base64URL | 1.33× | ✅* | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Ascii85 | 1.25× | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Adobe85 | ~1.25× | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Z85 | 1.25× | ❌ | ✅ | ❌ | ✅ | ✅ | ❌ |
 
-[`trim_base64_end_padding`]: https://docs.rs/b2t-codecs/latest/b2t_codecs/fn.trim_base64_end_padding.html
+- ✅ Every character in the codec alphabet can be embedded without escaping.
+- ❌ At least one character in the codec alphabet must be escaped.
+
+JSON, YAML, and TOML assume double-quoted strings. XML and HTML cover text
+content and quoted attribute values. Sizes compare complete encoding quanta.
+
+Adobe85 APIs use raw payloads. Encoders omit the traditional `<~` and `~>`
+delimiters, while decoders ignore ASCII whitespace within payloads.
+
+\* Canonical Base32, Base32Hex, and Base64URL output includes reserved `=`
+padding. Remove it to make the output URL-safe as-is, or percent-encode it with
+the rest of the URL component.
 
 ## License
 

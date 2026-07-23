@@ -9,12 +9,11 @@
 //! ```rust
 //! use b2t_codecs::base16::{encode_base16_string, try_decode_base16_string};
 //!
-//! let encoded = encode_base16_string(b"\xde\xad\xbe\xef");
-//! assert_eq!(encoded, "deadbeef");
-//! assert_eq!(
-//!     try_decode_base16_string("dEaDbEeF").as_deref(),
-//!     Some([0xde, 0xad, 0xbe, 0xef].as_slice()),
-//! );
+//! let encoded = encode_base16_string(b"Hello,World!");
+//! assert_eq!(encoded, "48656c6c6f2c576f726c6421");
+//!
+//! let decoded = &*try_decode_base16_string(&encoded).unwrap();
+//! assert_eq!(decoded, b"Hello,World!");
 //! ```
 // BASE16 CODEC
 // The default encoder emits lowercase ASCII, while the default decoder accepts

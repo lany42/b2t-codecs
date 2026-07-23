@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Lany Atwood <lany@colorized.life>
-//! Decoders for strict ASCII85, Adobe85, and ZeroMQ Z85.
+//! Decoders for strict Ascii85, Adobe85, and ZeroMQ Z85.
 //!
-//! Strict ASCII85 and Z85 require complete five-symbol input quanta. Adobe85
+//! Strict Ascii85 and Z85 require complete five-symbol input quanta. Adobe85
 //! additionally recognizes `z` as a compressed zero quantum and decodes
-//! two-to-four-symbol final quanta using implicit padding.
+//! two-to-four-symbol final quanta using implicit padding. Adobe85 decoders
+//! accept raw payloads without `<~` and `~>` delimiters and ignore ASCII
+//! whitespace within payloads.
 //!
 //! ```rust
 //! use b2t_codecs::base85::{try_decode_adobe85_string, try_decode_z85_string};
@@ -29,9 +31,10 @@ const Z85: Decoder = const {
 
 /// Decodes a raw Adobe85 string.
 ///
-/// The decoder accepts compressed zero quanta and implicit final padding but
-/// not Adobe delimiters or whitespace. Returns [`None`] if the input is
-/// malformed or a decoded quantum exceeds [`u32::MAX`].
+/// The decoder accepts compressed zero quanta and implicit final padding,
+/// ignores ASCII whitespace, and does not accept `<~` and `~>` delimiters.
+/// Returns [`None`] if the input is malformed or a decoded quantum exceeds
+/// [`u32::MAX`].
 #[must_use = "the decoding result should be handled"]
 #[inline]
 pub fn try_decode_adobe85_string(adobe85: &str) -> Option<Box<[u8]>> {
@@ -40,18 +43,19 @@ pub fn try_decode_adobe85_string(adobe85: &str) -> Option<Box<[u8]>> {
 
 /// Decodes raw Adobe85 ASCII bytes.
 ///
-/// The decoder accepts compressed zero quanta and implicit final padding but
-/// not Adobe delimiters or whitespace. Returns [`None`] if the input is
-/// malformed or a decoded quantum exceeds [`u32::MAX`].
+/// The decoder accepts compressed zero quanta and implicit final padding,
+/// ignores ASCII whitespace, and does not accept `<~` and `~>` delimiters.
+/// Returns [`None`] if the input is malformed or a decoded quantum exceeds
+/// [`u32::MAX`].
 #[must_use = "the decoding result should be handled"]
 #[inline]
 pub fn try_decode_adobe85(adobe85: &[u8]) -> Option<Box<[u8]>> {
     ASCII85.try_decode_base85ext(adobe85, super::ADOBE85_ZEROS, super::ADOBE85_DEC_PAD)
 }
 
-/// Decodes a strict ASCII85 string.
+/// Decodes a strict Ascii85 string.
 ///
-/// Returns [`None`] unless `ascii85` consists of complete five-symbol ASCII85
+/// Returns [`None`] unless `ascii85` consists of complete five-symbol Ascii85
 /// quanta whose decoded values fit in a [`u32`].
 #[must_use = "the decoding result should be handled"]
 #[inline]
@@ -59,9 +63,9 @@ pub fn try_decode_ascii85_string(ascii85: &str) -> Option<Box<[u8]>> {
     ASCII85.try_decode_base85_string(ascii85)
 }
 
-/// Decodes strict ASCII85 bytes.
+/// Decodes strict Ascii85 bytes.
 ///
-/// Returns [`None`] unless `ascii85` consists of complete five-symbol ASCII85
+/// Returns [`None`] unless `ascii85` consists of complete five-symbol Ascii85
 /// quanta whose decoded values fit in a [`u32`].
 #[must_use = "the decoding result should be handled"]
 #[inline]
@@ -173,48 +177,41 @@ impl<'d> Decoder<'d> {
         let mut ret = Vec::<u8>::with_capacity(capacity);
 
         let mut r = 0usize;
+        let mut p = 0usize;
+        let mut chunk = [tail_pad; 5];
         while r < base85.len() {
             // SAFETY: r less than slice length
             let c = unsafe { *base85.get_unchecked(r) };
 
             // decompress zeros and continue
             if c == zeros_byte {
-                ret.extend_from_slice(&[0u8; 4]);
-                r += 1;
-            }
-            // try to pull a whole chunk
-            // NOTE: zeros_byte in a chunk results in None
-            else if r + 5 <= base85.len() {
-                let chunk: [u8; 5] = base85[r..r + 5].try_into().ok()?;
-                ret.extend_from_slice(&self.decode_base85_chunk(chunk)?);
-                r += 5;
-            }
-            // tail section
-            else {
-                // must be 2, 3, or 4; a single trailing ASCII byte cannot be
-                // produced by the canonical encoder
-                let rem = base85.len() - r;
-                if rem == 1 {
+                if p != 0 {
                     return None;
                 }
+                ret.extend_from_slice(&[0u8; 4]);
+                r += 1;
+            } else if c.is_ascii_whitespace() || c == b'\x0b' {
+                r += 1;
+            } else {
+                chunk[p] = c;
+                p += 1;
+                r += 1;
+            }
 
-                // pad with tail_pad bytes to reverse encoding padding
-                let mut padded = [tail_pad; 5];
-                padded[..rem].copy_from_slice(&base85[r..]);
+            if p == 5 {
+                ret.extend_from_slice(&self.decode_base85_chunk(chunk)?);
+                chunk.fill(tail_pad);
+                p = 0;
+            }
+        }
 
-                // NOTE: Returns None if padded chunk is malformed
-                let decoded = self.decode_base85_chunk(padded)?;
-
-                // the number of tail padding bytes added are equal to the amount
-                // of bytes stripped from the decoded buffer
-                //      - 2 ASCII => 3 pad bytes => 1 byte output
-                //      - 3 ASCII => 2 pad bytes => 2 bytes output
-                //      - 4 ASCII => 1 pad byte  => 3 bytes output
-                //
-                // that is, bytes kept: remainder - 1
-                ret.extend_from_slice(&decoded[..rem - 1]);
-
-                break;
+        // tail handling
+        match p {
+            0 => {}
+            1 => return None,
+            _ => {
+                let decoded = self.decode_base85_chunk(chunk)?;
+                ret.extend_from_slice(&decoded[..p - 1]);
             }
         }
 
@@ -504,6 +501,73 @@ mod tests {
     }
 
     #[test]
+    fn adobe85_decode_ignores_ascii_whitespace_at_every_position() {
+        const ASCII_WHITESPACE: [u8; 6] = *b"\t\n\x0b\x0c\r ";
+        let inputs: &[&[u8]] = &[
+            b"",
+            b"\0\0\0\0",
+            b"A",
+            b"AB",
+            b"ABC",
+            b"ABCD",
+            b"ABCDE",
+            b"ABCDEF",
+            b"ABCDEFG",
+            b"\0\0\0\0ABC",
+        ];
+
+        for &input in inputs {
+            let encoded = encode_adobe85(input);
+
+            for position in 0..=encoded.len() {
+                for whitespace in ASCII_WHITESPACE {
+                    let mut with_whitespace = encoded.to_vec();
+                    with_whitespace.insert(position, whitespace);
+
+                    assert_eq!(
+                        try_decode_adobe85(&with_whitespace).as_deref(),
+                        Some(input),
+                        "byte API changed {encoded:?} with whitespace {whitespace:#04x} \
+                         at position {position}"
+                    );
+
+                    let with_whitespace =
+                        std::str::from_utf8(&with_whitespace).expect("input remains ASCII");
+                    assert_eq!(
+                        try_decode_adobe85_string(with_whitespace).as_deref(),
+                        Some(input),
+                        "string API changed {encoded:?} with whitespace {whitespace:#04x} \
+                         at position {position}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn adobe85_decode_ignores_dense_ascii_whitespace_within_tails() {
+        const ASCII_WHITESPACE: &[u8] = b"\t\n\x0b\x0c\r ";
+
+        for input in [b"A".as_slice(), b"AB".as_slice(), b"ABC".as_slice()] {
+            let encoded = encode_adobe85(input);
+            let mut with_whitespace =
+                Vec::with_capacity(encoded.len() * (ASCII_WHITESPACE.len() + 1));
+
+            for byte in encoded.iter().copied() {
+                with_whitespace.extend_from_slice(ASCII_WHITESPACE);
+                with_whitespace.push(byte);
+            }
+            with_whitespace.extend_from_slice(ASCII_WHITESPACE);
+
+            assert_eq!(
+                try_decode_adobe85(&with_whitespace).as_deref(),
+                Some(input),
+                "dense whitespace changed tail {encoded:?}"
+            );
+        }
+    }
+
+    #[test]
     fn adobe85_decode_rejects_single_ascii_tails() {
         for input in [b"!".as_slice(), b"!!!!!!".as_slice(), b"z!".as_slice()] {
             assert_eq!(try_decode_adobe85(input), None, "accepted {input:?}");
@@ -529,7 +593,7 @@ mod tests {
 
     #[test]
     fn adobe85_decode_rejects_invalid_bytes_in_any_frame() {
-        for invalid in [(MIN_ASCII_ASCII85 - 1) as u8, MAX_ASCII_ASCII85 as u8] {
+        for invalid in [b'\0', MAX_ASCII_ASCII85 as u8] {
             for position in 0..5 {
                 let mut input = *b"!!!!!";
                 input[position] = invalid;

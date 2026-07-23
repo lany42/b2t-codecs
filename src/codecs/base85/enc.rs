@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Lany Atwood <lany@colorized.life>
-//! Encoders for strict ASCII85, Adobe85, and ZeroMQ Z85.
+//! Encoders for strict Ascii85, Adobe85, and ZeroMQ Z85.
 //!
-//! Strict ASCII85 and Z85 require complete four-byte input quanta. Adobe85
+//! Strict Ascii85 and Z85 require complete four-byte input quanta. Adobe85
 //! accepts partial final quanta and compresses each full all-zero quantum as
-//! `z`.
+//! `z`. Adobe85 encoders emit raw payloads without the traditional `<~` and
+//! `~>` delimiters.
 //!
 //! ```rust
 //! use b2t_codecs::base85::{encode_adobe85_string, try_encode_z85_string};
@@ -27,7 +28,8 @@ const Z85: Encoder = const {
 /// Encodes `bytes` as a raw Adobe85 string.
 ///
 /// Full zero quanta are compressed as `z`, and a final partial quantum uses
-/// implicit padding. The output does not include `<~` and `~>` delimiters.
+/// implicit padding. The output does not include the traditional `<~` and `~>`
+/// delimiters.
 ///
 /// # Panics
 ///
@@ -41,7 +43,8 @@ pub fn encode_adobe85_string(bytes: &[u8]) -> String {
 /// Encodes `bytes` as raw Adobe85 ASCII bytes.
 ///
 /// Full zero quanta are compressed as `z`, and a final partial quantum uses
-/// implicit padding. The output does not include `<~` and `~>` delimiters.
+/// implicit padding. The output does not include the traditional `<~` and `~>`
+/// delimiters.
 ///
 /// # Panics
 ///
@@ -52,7 +55,7 @@ pub fn encode_adobe85(bytes: &[u8]) -> Box<[u8]> {
     ASCII85.encode_base85ext(bytes, super::ADOBE85_ZEROS)
 }
 
-/// Encodes complete four-byte quanta as a strict ASCII85 string.
+/// Encodes complete four-byte quanta as a strict Ascii85 string.
 ///
 /// Returns [`None`] if `bytes.len()` is not divisible by four or the encoded
 /// length cannot be represented as a [`usize`].
@@ -62,7 +65,7 @@ pub fn try_encode_ascii85_string(bytes: &[u8]) -> Option<String> {
     ASCII85.try_encode_base85_string(bytes)
 }
 
-/// Encodes complete four-byte quanta as strict ASCII85 bytes.
+/// Encodes complete four-byte quanta as strict Ascii85 bytes.
 ///
 /// Returns [`None`] if `bytes.len()` is not divisible by four or the encoded
 /// length cannot be represented as a [`usize`].

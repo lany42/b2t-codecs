@@ -9,12 +9,11 @@
 //! ```rust
 //! use b2t_codecs::base64::{encode_base64url_string, try_decode_base64url_string};
 //!
-//! let encoded = encode_base64url_string(&[0xfb, 0xff]);
-//! assert_eq!(encoded, "-_8=");
-//! assert_eq!(
-//!     try_decode_base64url_string(&encoded).as_deref(),
-//!     Some([0xfb, 0xff].as_slice()),
-//! );
+//! let encoded = encode_base64url_string(b"Hello,World!");
+//! assert_eq!(encoded, "SGVsbG8sV29ybGQh");
+//!
+//! let decoded = &*try_decode_base64url_string(&encoded).unwrap();
+//! assert_eq!(decoded, b"Hello,World!");
 //! ```
 // BASE64 CODEC
 // Canonical RFC 4648 Base64 and Base64URL codecs. Strict decoders reject
