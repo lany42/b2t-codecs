@@ -55,6 +55,12 @@
 //! \* Canonical Base32, Base32Hex, and Base64URL output includes reserved `=`
 //! padding. Remove it to make the output URL-safe as-is, or percent-encode it
 //! with the rest of the URL component.
+
+#![no_std]
+
+#[cfg(feature = "alloc")]
+extern crate alloc;
+
 mod codecs;
 
 pub use codecs::base16;

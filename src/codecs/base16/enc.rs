@@ -10,6 +10,10 @@
 //! assert_eq!(encode_base16_string(&[0xab, 0xcd]), "abcd");
 //! assert_eq!(encode_base16upper_string(&[0xab, 0xcd]), "ABCD");
 //! ```
+
+#[cfg(feature = "alloc")]
+use alloc::{boxed::Box, string::String, vec::Vec};
+
 const BASE16_LOWER: Encoder = const {
     use super::ENCODER_LOWER;
     Encoder::from_alphabet(&ENCODER_LOWER)
@@ -85,32 +89,72 @@ impl<'e> Encoder<'e> {
     }
 
     #[inline]
+    fn encoded_length(&self, src: &[u8]) -> usize {
+        src.len()
+            .checked_mul(2)
+            .expect("base16 encoded length overflow")
+    }
+
+    #[inline]
     fn encode_base16_string(&self, bytes: &[u8]) -> String {
         let encoded = self.encode_base16(bytes);
         // SAFETY: base16 bytes are ASCII, therefore always valid UTF-8.
         unsafe { String::from_utf8_unchecked(encoded.into_vec()) }
     }
 
+    #[cfg(feature = "alloc")]
     fn encode_base16(&self, bytes: &[u8]) -> Box<[u8]> {
         if bytes.is_empty() {
             return Vec::<u8>::new().into_boxed_slice();
         }
 
-        let capacity = bytes
-            .len()
-            .checked_mul(2)
-            .expect("base16 encoded length overflow");
-        let mut ret = Vec::<u8>::with_capacity(capacity);
+        let length = self.encoded_length(bytes);
+        let mut ret = Vec::<u8>::with_capacity(length);
 
-        for &byte in bytes {
-            ret.extend_from_slice(&self.encode_base16_byte(byte));
-        }
+        let ret = self.try_encode_base16_into(src, &dst)
 
         ret.into_boxed_slice()
     }
 
+    fn try_encode_base16_into<'a>(&self, src: &[u8], dst: &'a mut [u8]) -> Option<&'a [u8]> {
+        if src.is_empty() {
+            return Some(&[]);
+        }
+
+        // INVARIANT: length == 2 * src.len() <= dst.len()
+        let length = self.encoded_length(src);
+        if dst.len() < length {
+            return None;
+        }
+
+        let written = self.encode_base16_payload(src, dst.as_mut_ptr());
+        assert!(written == length);
+
+        Some(&dst[..written])
+    }
+
     #[inline]
-    fn encode_base16_byte(&self, byte: u8) -> [u8; 2] {
+    fn encode_base16_payload(&self, src: &[u8], dst: *mut u8) -> usize {
+        // INVARIANT: 2 * i + 1 < dst.len()
+        let mut i = 0usize;
+
+        // SAFETY:
+        //  - ptr derived from dst
+        //  - 2 * i + 1 < dst.len() always
+        //  - dst never accessed during ptr's lifetime
+        unsafe {
+            for &byte in src {
+                let (hi, lo) = self.encode_base16_byte(byte);
+                dst.add(2 * i).write(hi);
+                dst.add(2 * i + 1).write(lo);
+                i += 1;
+            }
+        }
+        i
+    }
+
+    #[inline]
+    fn encode_base16_byte(&self, byte: u8) -> (u8, u8) {
         let hi = (byte >> 4) as usize;
         let lo = (byte & 0x0f) as usize;
 
@@ -119,7 +163,7 @@ impl<'e> Encoder<'e> {
         // SAFETY: lo is four bits with a range [0, 16).
         let lo = unsafe { *self.encoder.get_unchecked(lo) };
 
-        [hi, lo]
+        (hi, lo)
     }
 }
 

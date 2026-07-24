@@ -10,6 +10,10 @@ keywords = ["base16", "base32", "base64", "base85", "z85"]
 categories = ["encoding"]
 exclude = ["/scripts", "/.gitignore"]
 
+[features]
+default = ["alloc"]
+alloc = []
+
 [dependencies]
 
 [profile.dev.package."*"]
