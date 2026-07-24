@@ -73,9 +73,9 @@ mod sealed {
 
 /// Converts fixed-width integers to and from canonical RFC 4648 Base32.
 ///
-/// This sealed trait is implemented for every signed and unsigned primitive
-/// integer type. Values are encoded from their big-endian bytes at their full
-/// type width.
+/// This sealed trait is implemented for all fixed-width signed and unsigned
+/// primitive integer types. Values are encoded from their big-endian bytes at
+/// their full type width.
 pub trait Base32: sealed::Sealed + Copy {
     /// Returns the padded Base32 encoding of this value.
     #[must_use = "the encoded value should be used"]
@@ -102,9 +102,9 @@ pub trait Base32: sealed::Sealed + Copy {
 
 /// Converts fixed-width integers to and from canonical RFC 4648 Base32Hex.
 ///
-/// This sealed trait is implemented for every signed and unsigned primitive
-/// integer type. Values are encoded from their big-endian bytes at their full
-/// type width.
+/// This sealed trait is implemented for all fixed-width signed and unsigned
+/// primitive integer types. Values are encoded from their big-endian bytes at
+/// their full type width.
 pub trait Base32Hex: sealed::Sealed + Copy {
     /// Returns the padded Base32Hex encoding of this value.
     #[must_use = "the encoded value should be used"]
@@ -201,9 +201,7 @@ macro_rules! impl_base32 {
     };
 }
 
-impl_base32!(
-    u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize
-);
+impl_base32!(u8, u16, u32, u64, u128, i8, i16, i32, i64, i128);
 
 #[cfg(test)]
 mod tests {
@@ -278,36 +276,6 @@ mod tests {
             "G0000000000000000000000000======",
             "FVVVVVVVVVVVVVVVVVVVVVVVVS======"
         );
-
-        #[cfg(target_pointer_width = "16")]
-        {
-            assert_min_and_max_encoding!(usize, "AAAA====", "777Q====", "0000====", "VVVG====");
-            assert_min_and_max_encoding!(isize, "QAAA====", "P77Q====", "G000====", "FVVG====");
-        }
-
-        #[cfg(target_pointer_width = "32")]
-        {
-            assert_min_and_max_encoding!(usize, "AAAAAAA=", "777777Y=", "0000000=", "VVVVVVO=");
-            assert_min_and_max_encoding!(isize, "QAAAAAA=", "P77777Y=", "G000000=", "FVVVVVO=");
-        }
-
-        #[cfg(target_pointer_width = "64")]
-        {
-            assert_min_and_max_encoding!(
-                usize,
-                "AAAAAAAAAAAAA===",
-                "7777777777776===",
-                "0000000000000===",
-                "VVVVVVVVVVVVU==="
-            );
-            assert_min_and_max_encoding!(
-                isize,
-                "QAAAAAAAAAAAA===",
-                "P777777777776===",
-                "G000000000000===",
-                "FVVVVVVVVVVVU==="
-            );
-        }
 
         assert_primitive_encoding(0xb0u8, "WA======", "M0======");
     }

@@ -96,9 +96,9 @@ mod sealed {
 
 /// Converts fixed-width integers to and from canonical RFC 4648 Base64.
 ///
-/// This sealed trait is implemented for every signed and unsigned primitive
-/// integer type. Values are encoded from their big-endian bytes at their full
-/// type width.
+/// This sealed trait is implemented for all fixed-width signed and unsigned
+/// primitive integer types. Values are encoded from their big-endian bytes at
+/// their full type width.
 pub trait Base64: sealed::Sealed + Copy {
     /// Returns the padded Base64 encoding of this value.
     #[must_use = "the encoded value should be used"]
@@ -125,9 +125,9 @@ pub trait Base64: sealed::Sealed + Copy {
 
 /// Converts fixed-width integers to and from canonical RFC 4648 Base64URL.
 ///
-/// This sealed trait is implemented for every signed and unsigned primitive
-/// integer type. Values are encoded from their big-endian bytes at their full
-/// type width.
+/// This sealed trait is implemented for all fixed-width signed and unsigned
+/// primitive integer types. Values are encoded from their big-endian bytes at
+/// their full type width.
 pub trait Base64Url: sealed::Sealed + Copy {
     /// Returns the padded Base64URL encoding of this value.
     #[must_use = "the encoded value should be used"]
@@ -224,9 +224,7 @@ macro_rules! impl_base64 {
     };
 }
 
-impl_base64!(
-    u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize
-);
+impl_base64!(u8, u16, u32, u64, u128, i8, i16, i32, i64, i128);
 
 #[cfg(test)]
 mod tests {
@@ -278,24 +276,6 @@ mod tests {
         assert_min_and_max_encoding!(i32, "gAAAAA==", "f////w==");
         assert_min_and_max_encoding!(i64, "gAAAAAAAAAA=", "f/////////8=");
         assert_min_and_max_encoding!(i128, "gAAAAAAAAAAAAAAAAAAAAA==", "f////////////////////w==");
-
-        #[cfg(target_pointer_width = "16")]
-        {
-            assert_min_and_max_encoding!(usize, "AAA=", "//8=");
-            assert_min_and_max_encoding!(isize, "gAA=", "f/8=");
-        }
-
-        #[cfg(target_pointer_width = "32")]
-        {
-            assert_min_and_max_encoding!(usize, "AAAAAA==", "/////w==");
-            assert_min_and_max_encoding!(isize, "gAAAAA==", "f////w==");
-        }
-
-        #[cfg(target_pointer_width = "64")]
-        {
-            assert_min_and_max_encoding!(usize, "AAAAAAAAAAA=", "//////////8=");
-            assert_min_and_max_encoding!(isize, "gAAAAAAAAAA=", "f/////////8=");
-        }
 
         // Exercise alphabet digit 62 as well as the digit-63 cases above.
         assert_primitive_encoding(0xfbu8, "+w==");
