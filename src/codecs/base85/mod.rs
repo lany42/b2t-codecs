@@ -95,10 +95,10 @@ mod sealed {
 
 /// Converts fixed-width integers to and from Adobe-style Ascii85.
 ///
-/// This sealed trait is implemented for every signed and unsigned primitive
-/// integer type. Values use their big-endian byte representation. Encodings are
-/// raw payloads without `<~` and `~>` delimiters. Decoding ignores ASCII
-/// whitespace within payloads and does not accept delimiters.
+/// This sealed trait is implemented for all fixed-width signed and unsigned
+/// primitive integer types. Values use their big-endian byte representation.
+/// Encodings are raw payloads without `<~` and `~>` delimiters. Decoding
+/// ignores ASCII whitespace within payloads and does not accept delimiters.
 pub trait Adobe85: sealed::Sealed + Copy {
     /// Returns the Adobe85 encoding of this value.
     #[must_use = "the encoded value should be used"]
@@ -129,18 +129,12 @@ pub trait Adobe85: sealed::Sealed + Copy {
 /// and `i128`. Values use their big-endian byte representation.
 pub trait Z85: sealed::Sealed + Copy {
     /// Returns the Z85 encoding of this value.
-    ///
-    /// Returns [`None`] if the value's byte width is not a complete four-byte
-    /// quantum.
-    #[must_use = "the encoding result should be handled"]
-    fn as_z85_string(&self) -> Option<String>;
+    #[must_use = "the encoded value should be used"]
+    fn as_z85_string(&self) -> String;
 
     /// Returns the Z85 ASCII bytes for this value.
-    ///
-    /// Returns [`None`] if the value's byte width is not a complete four-byte
-    /// quantum.
-    #[must_use = "the encoding result should be handled"]
-    fn as_z85(&self) -> Option<Box<[u8]>>;
+    #[must_use = "the encoded value should be used"]
+    fn as_z85(&self) -> Box<[u8]>;
 
     /// Decodes a Z85 string into a value of exactly this type's width.
     ///
@@ -164,18 +158,12 @@ pub trait Z85: sealed::Sealed + Copy {
 /// quanta.
 pub trait Base85: sealed::Sealed + Copy {
     /// Returns the strict Ascii85 encoding of this value.
-    ///
-    /// Returns [`None`] if the value's byte width is not a complete four-byte
-    /// quantum.
-    #[must_use = "the encoding result should be handled"]
-    fn as_base85_string(&self) -> Option<String>;
+    #[must_use = "the encoded value should be used"]
+    fn as_base85_string(&self) -> String;
 
     /// Returns the strict Ascii85 bytes for this value.
-    ///
-    /// Returns [`None`] if the value's byte width is not a complete four-byte
-    /// quantum.
-    #[must_use = "the encoding result should be handled"]
-    fn as_base85(&self) -> Option<Box<[u8]>>;
+    #[must_use = "the encoded value should be used"]
+    fn as_base85(&self) -> Box<[u8]>;
 
     /// Decodes a strict Ascii85 string into a value of this type's exact width.
     ///
@@ -196,13 +184,15 @@ macro_rules! impl_base85 {
         $(
             impl Base85 for $ty {
                 #[inline]
-                fn as_base85_string(&self) -> Option<String> {
+                fn as_base85_string(&self) -> String {
                     try_encode_ascii85_string(&self.to_be_bytes())
+                        .expect("Base85 trait implementations require four-byte-aligned widths")
                 }
 
                 #[inline]
-                fn as_base85(&self) -> Option<Box<[u8]>> {
+                fn as_base85(&self) -> Box<[u8]> {
                     try_encode_ascii85(&self.to_be_bytes())
+                        .expect("Base85 trait implementations require four-byte-aligned widths")
                 }
 
                 #[inline]
@@ -232,13 +222,15 @@ macro_rules! impl_base85 {
 
             impl Z85 for $ty {
                 #[inline]
-                fn as_z85_string(&self) -> Option<String> {
+                fn as_z85_string(&self) -> String {
                     try_encode_z85_string(&self.to_be_bytes())
+                        .expect("Z85 trait implementations require four-byte-aligned widths")
                 }
 
                 #[inline]
-                fn as_z85(&self) -> Option<Box<[u8]>> {
+                fn as_z85(&self) -> Box<[u8]> {
                     try_encode_z85(&self.to_be_bytes())
+                        .expect("Z85 trait implementations require four-byte-aligned widths")
                 }
 
                 #[inline]
@@ -309,9 +301,7 @@ macro_rules! impl_adobe85 {
     };
 }
 
-impl_adobe85!(
-    u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize
-);
+impl_adobe85!(u8, u16, u32, u64, u128, i8, i16, i32, i64, i128);
 
 // INVARIANT: the strict base85 codec cannot encode anything less than 4 bytes
 // u8, u16, i8, i16 cannot be encoded without caller-provided padding
@@ -327,22 +317,16 @@ mod tests {
     where
         T: Base85 + Z85 + Debug + Eq,
     {
-        let ascii85_string = value
-            .as_base85_string()
-            .expect("primitive must be ASCII85 encodable");
-        let ascii85 = value
-            .as_base85()
-            .expect("primitive must be ASCII85 encodable");
+        let ascii85_string = value.as_base85_string();
+        let ascii85 = value.as_base85();
 
         assert_eq!(ascii85_string.as_bytes(), ascii85.as_ref());
         assert_eq!(ascii85.len(), std::mem::size_of::<T>() * 5 / 4);
         assert_eq!(T::try_from_base85_string(&ascii85_string), Some(value));
         assert_eq!(T::try_from_base85(&ascii85), Some(value));
 
-        let z85_string = value
-            .as_z85_string()
-            .expect("primitive must be Z85 encodable");
-        let z85 = value.as_z85().expect("primitive must be Z85 encodable");
+        let z85_string = value.as_z85_string();
+        let z85 = value.as_z85();
 
         assert_eq!(z85_string.as_bytes(), z85.as_ref());
         assert_eq!(z85.len(), std::mem::size_of::<T>() * 5 / 4);
@@ -366,8 +350,8 @@ mod tests {
         assert_min_and_max_roundtrip!(i64);
         assert_min_and_max_roundtrip!(i128);
 
-        assert_eq!(0u32.as_base85_string().as_deref(), Some("!!!!!"));
-        assert_eq!(u32::MAX.as_base85_string().as_deref(), Some("s8W-!"));
+        assert_eq!(0u32.as_base85_string(), "!!!!!");
+        assert_eq!(u32::MAX.as_base85_string(), "s8W-!");
     }
 
     #[test]
@@ -417,24 +401,6 @@ mod tests {
             assert_min_and_max_encoding!(i32, "J,fQL", "J,fQK");
             assert_min_and_max_encoding!(i64, "J,fQLz", "J,fQKs8W-!");
             assert_min_and_max_encoding!(i128, "J,fQLzzz", "J,fQKs8W-!s8W-!s8W-!");
-
-            #[cfg(target_pointer_width = "16")]
-            {
-                assert_min_and_max_encoding!(usize, "!!!", "s8N");
-                assert_min_and_max_encoding!(isize, "J,f", "J,]");
-            }
-
-            #[cfg(target_pointer_width = "32")]
-            {
-                assert_min_and_max_encoding!(usize, "z", "s8W-!");
-                assert_min_and_max_encoding!(isize, "J,fQL", "J,fQK");
-            }
-
-            #[cfg(target_pointer_width = "64")]
-            {
-                assert_min_and_max_encoding!(usize, "zz", "s8W-!s8W-!");
-                assert_min_and_max_encoding!(isize, "J,fQLz", "J,fQKs8W-!");
-            }
         }
 
         #[test]

@@ -76,9 +76,9 @@ mod sealed {
 
 /// Converts fixed-width integers to and from Base16.
 ///
-/// This sealed trait is implemented for every signed and unsigned primitive
-/// integer type. Values are encoded from their big-endian bytes at their full
-/// type width.
+/// This sealed trait is implemented for all fixed-width signed and unsigned
+/// primitive integer types. Values are encoded from their big-endian bytes at
+/// their full type width.
 pub trait Base16: sealed::Sealed + Copy {
     /// Returns the lowercase Base16 encoding of this value.
     #[must_use = "the encoded value should be used"]
@@ -142,9 +142,7 @@ macro_rules! impl_base16 {
     };
 }
 
-impl_base16!(
-    u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize
-);
+impl_base16!(u8, u16, u32, u64, u128, i8, i16, i32, i64, i128);
 
 #[cfg(test)]
 mod tests {
@@ -193,24 +191,6 @@ mod tests {
             "80000000000000000000000000000000",
             "7fffffffffffffffffffffffffffffff"
         );
-
-        #[cfg(target_pointer_width = "16")]
-        {
-            assert_min_and_max_encoding!(usize, "0000", "ffff");
-            assert_min_and_max_encoding!(isize, "8000", "7fff");
-        }
-
-        #[cfg(target_pointer_width = "32")]
-        {
-            assert_min_and_max_encoding!(usize, "00000000", "ffffffff");
-            assert_min_and_max_encoding!(isize, "80000000", "7fffffff");
-        }
-
-        #[cfg(target_pointer_width = "64")]
-        {
-            assert_min_and_max_encoding!(usize, "0000000000000000", "ffffffffffffffff");
-            assert_min_and_max_encoding!(isize, "8000000000000000", "7fffffffffffffff");
-        }
     }
 
     #[test]

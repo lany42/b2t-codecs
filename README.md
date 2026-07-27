@@ -25,22 +25,26 @@ Choose based on where the encoded string will live:
 - For URL tokens and filenames, use Base64URL.
 - For denser JSON, YAML, or TOML strings, use Z85.
 
-| Codec | Size | URL | JSON | XML | YAML | TOML | HTML |
-|---|---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| Base16 | 2.00× | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Base32 | 1.60× | ✅* | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Base32Hex | 1.60× | ✅* | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Base64 | 1.33× | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Base64URL | 1.33× | ✅* | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Ascii85 | 1.25× | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| Adobe85 | ~1.25× | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| Z85 | 1.25× | ❌ | ✅ | ❌ | ✅ | ✅ | ❌ |
+| Codec | Size | Padding | URL | JSON | XML | YAML | TOML | HTML |
+|---|---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| Base16 | 2.00× | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Base32 | 1.60× | ✅ | ✅* | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Base32Hex | 1.60× | ✅ | ✅* | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Base64 | 1.33× | ✅ | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Base64URL | 1.33× | ✅ | ✅* | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Ascii85 | 1.25× | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Adobe85 | ~1.25× | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Z85 | 1.25× | ❌ | ❌ | ✅ | ❌ | ✅ | ✅ | ❌ |
 
-- ✅ Every character in the codec alphabet can be embedded without escaping.
-- ❌ At least one character in the codec alphabet must be escaped.
+- Padding: ✅ accepts arbitrary byte lengths; ❌ requires aligned input.
+- URL through HTML: ✅ every alphabet character can be embedded without
+  escaping; ❌ at least one alphabet character must be escaped.
 
 JSON, YAML, and TOML assume double-quoted strings. XML and HTML cover text
 content and quoted attribute values. Sizes compare complete encoding quanta.
+Padding indicates whether arbitrary byte lengths are accepted: Base16 needs no
+padding symbols, Base32 and Base64 pad partial tails, Adobe85 uses implicit tail
+padding, and strict Ascii85 and Z85 require four-byte input alignment.
 
 Adobe85 APIs use raw payloads. Encoders omit the traditional `<~` and `~>`
 delimiters, while decoders ignore ASCII whitespace within payloads.
