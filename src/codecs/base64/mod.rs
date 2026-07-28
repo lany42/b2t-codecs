@@ -32,7 +32,7 @@ pub use dec::{
 pub use enc::{encode_base64, encode_base64_string, encode_base64url, encode_base64url_string};
 
 #[cfg(feature = "alloc")]
-use alloc::{boxed::Box, string::String, vec::Vec};
+use alloc::{boxed::Box, string::String};
 
 const ENCODER: [u8; 64] = [
     65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88,

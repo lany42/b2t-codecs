@@ -221,7 +221,7 @@ impl<'d> Decoder<'d> {
     #[inline]
     fn try_decode_into<'a>(&self, src: &[u8], dst: &'a mut [u8]) -> Option<&'a [u8]> {
         if src.is_empty() {
-            return Some(&[]);
+            return Some(&dst[..0]);
         }
 
         // INVARIANT: input length must be a multiple of 2
@@ -399,10 +399,10 @@ mod tests {
         );
 
         let mut untouched = [b'x'; 1];
-        assert_eq!(
-            try_decode_from_base16(b"", &mut untouched),
-            Some([].as_slice())
-        );
+        let dst_ptr = untouched.as_ptr();
+        let decoded = try_decode_from_base16(b"", &mut untouched).unwrap();
+        assert!(decoded.is_empty());
+        assert_eq!(decoded.as_ptr(), dst_ptr);
         assert_eq!(untouched, [b'x']);
     }
 

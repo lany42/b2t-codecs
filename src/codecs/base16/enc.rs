@@ -176,6 +176,10 @@ impl<'e> Encoder<'e> {
     }
 
     fn encode_into<'a>(&self, src: &[u8], dst: &'a mut [u8]) -> Option<&'a [u8]> {
+        if src.is_empty() {
+            return Some(&dst[..0]);
+        }
+
         let payload_len = encoded_length_base16(src);
         if dst.len() < payload_len {
             return None;
@@ -285,10 +289,10 @@ mod tests {
         assert_eq!(&upper[6..], b"????");
 
         let mut untouched = [b'x'; 1];
-        assert_eq!(
-            try_encode_into_base16(b"", &mut untouched),
-            Some([].as_slice())
-        );
+        let dst_ptr = untouched.as_ptr();
+        let encoded = try_encode_into_base16(b"", &mut untouched).unwrap();
+        assert!(encoded.is_empty());
+        assert_eq!(encoded.as_ptr(), dst_ptr);
         assert_eq!(untouched, [b'x']);
     }
 

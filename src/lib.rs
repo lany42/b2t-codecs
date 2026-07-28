@@ -9,7 +9,7 @@
 //!
 //! ```yaml
 //! [dependencies]
-//! b2t-codecs = { version = "1", default-features = false }
+//! b2t-codecs = { version = "2", default-features = false }
 //! ```
 //!
 //! ## Quick Start
@@ -28,10 +28,10 @@
 //!
 //! ## Todo
 //!
-//! - [x] No-alloc API for Base16, v1.1
-//! - [ ] No-alloc API for Base32, v1.2
-//! - [ ] No-alloc API for Base64, v1.3
-//! - [ ] No-alloc API for Base85, v1.4
+//! - [x] No-alloc API for Base16, v2.0
+//! - [ ] No-alloc API for Base32, v2.1
+//! - [ ] No-alloc API for Base64, v2.2
+//! - [ ] No-alloc API for Base85, v2.3
 //!
 //! ## Codecs
 //!
