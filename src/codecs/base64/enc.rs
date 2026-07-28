@@ -22,6 +22,9 @@ const BASE64_URL: Encoder = const {
     Encoder::from_alphabet(&ENCODER_URL)
 };
 
+#[cfg(feature = "alloc")]
+use alloc::{boxed::Box, string::String, vec::Vec};
+
 /// Encodes `bytes` as a canonical padded Base64 string.
 ///
 /// # Panics

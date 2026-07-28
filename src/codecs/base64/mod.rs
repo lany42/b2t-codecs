@@ -31,6 +31,9 @@ pub use dec::{
 };
 pub use enc::{encode_base64, encode_base64_string, encode_base64url, encode_base64url_string};
 
+#[cfg(feature = "alloc")]
+use alloc::{boxed::Box, string::String, vec::Vec};
+
 const ENCODER: [u8; 64] = [
     65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88,
     89, 90, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114,
@@ -176,7 +179,7 @@ macro_rules! impl_base64 {
                 #[inline]
                 fn try_from_base64(base64: &[u8]) -> Option<Self> {
                     if let Some(bytes) = try_decode_base64(base64) {
-                        const SIZE: usize = std::mem::size_of::<$ty>();
+                        const SIZE: usize = core::mem::size_of::<$ty>();
                         if bytes.len() != SIZE {
                             return None;
                         }
@@ -208,7 +211,7 @@ macro_rules! impl_base64 {
                 #[inline]
                 fn try_from_base64url(base64: &[u8]) -> Option<Self> {
                     if let Some(bytes) = try_decode_base64url(base64) {
-                        const SIZE: usize = std::mem::size_of::<$ty>();
+                        const SIZE: usize = core::mem::size_of::<$ty>();
                         if bytes.len() != SIZE {
                             return None;
                         }
@@ -229,7 +232,7 @@ impl_base64!(u8, u16, u32, u64, u128, i8, i16, i32, i64, i128);
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fmt::Debug;
+    use alloc::fmt::Debug;
 
     fn assert_primitive_encoding<T>(value: T, expected: &str)
     where

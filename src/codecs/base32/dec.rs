@@ -28,6 +28,9 @@ const BASE32_HEX: Decoder = const {
     Decoder::from_table(&DECODER_HEX, MIN_ASCII_HEX, MAX_ASCII_HEX)
 };
 
+#[cfg(feature = "alloc")]
+use alloc::{boxed::Box, vec::Vec};
+
 /// Decodes a canonical padded Base32 string.
 ///
 /// Returns [`None`] unless `base32` uses the RFC 4648 Base32 alphabet, complete
@@ -321,6 +324,8 @@ mod tests {
     use super::super::enc::{encode_base32, encode_base32hex};
     use super::super::{ENCODER, ENCODER_HEX};
     use super::*;
+
+    use alloc::vec;
 
     type Encode = fn(&[u8]) -> Box<[u8]>;
     type Decode = fn(&[u8]) -> Option<Box<[u8]>>;

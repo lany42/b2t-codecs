@@ -29,6 +29,9 @@ const BASE64_URL: Decoder = const {
     Decoder::from_table(&DECODER_URL, MIN_ASCII_URL, MAX_ASCII_URL)
 };
 
+#[cfg(feature = "alloc")]
+use alloc::{boxed::Box, vec::Vec};
+
 /// Decodes a canonical padded Base64 string.
 ///
 /// Returns [`None`] unless `base64` uses the standard RFC 4648 alphabet,
@@ -333,6 +336,8 @@ mod tests {
     use super::super::enc::{encode_base64, encode_base64url};
     use super::super::{ENCODER, ENCODER_URL};
     use super::*;
+
+    use alloc::vec;
 
     type Decode = fn(&[u8]) -> Option<Box<[u8]>>;
 

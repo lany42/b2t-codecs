@@ -7,14 +7,20 @@
 //! the other case.
 //!
 //! ```rust
-//! use b2t_codecs::base16::{try_decode_base16_string, try_decode_base16upper_string};
+//! use b2t_codecs::base16::{try_decode_from_base16, try_decode_from_base16upper};
 //!
-//! assert_eq!(
-//!     try_decode_base16_string("aBcD").as_deref(),
-//!     Some([0xab, 0xcd].as_slice()),
-//! );
-//! assert!(try_decode_base16upper_string("aBcD").is_none());
+//! let mut mixed = [0; 2];
+//! let mut upper = [0; 2];
+//! let mixed = try_decode_from_base16(b"aBcD", &mut mixed);
+//! let upper = try_decode_from_base16upper(b"aBcD", &mut upper);
+//!
+//! assert_eq!(mixed, Some([0xab, 0xcd].as_slice()));
+//! assert_eq!(upper, None);
 //! ```
+
+#[cfg(feature = "alloc")]
+use alloc::{boxed::Box, vec::Vec};
+
 const BASE16_MIXED: Decoder = const {
     use super::{DECODER, MAX_ASCII, MIN_ASCII};
     Decoder::from_table(&DECODER, MIN_ASCII, MAX_ASCII)
@@ -32,60 +38,127 @@ const BASE16_UPPER: Decoder = const {
 ///
 /// Returns [`None`] if the input has an odd length or contains a non-Base16
 /// character.
+#[cfg(feature = "alloc")]
 #[must_use = "the decoding result should be handled"]
 #[inline]
 pub fn try_decode_base16_string(base16: &str) -> Option<Box<[u8]>> {
-    BASE16_MIXED.try_decode_base16_string(base16)
+    BASE16_MIXED.try_decode_string(base16)
 }
 
 /// Decodes a lowercase Base16 string.
 ///
 /// Returns [`None`] if the input has an odd length or contains any symbol
 /// outside lowercase Base16, including an uppercase letter.
+#[cfg(feature = "alloc")]
 #[must_use = "the decoding result should be handled"]
 #[inline]
 pub fn try_decode_base16lower_string(base16: &str) -> Option<Box<[u8]>> {
-    BASE16_LOWER.try_decode_base16_string(base16)
+    BASE16_LOWER.try_decode_string(base16)
 }
 
 /// Decodes an uppercase Base16 string.
 ///
 /// Returns [`None`] if the input has an odd length or contains any symbol
 /// outside uppercase Base16, including a lowercase letter.
+#[cfg(feature = "alloc")]
 #[must_use = "the decoding result should be handled"]
 #[inline]
 pub fn try_decode_base16upper_string(base16: &str) -> Option<Box<[u8]>> {
-    BASE16_UPPER.try_decode_base16_string(base16)
+    BASE16_UPPER.try_decode_string(base16)
 }
 
 /// Decodes mixed-case Base16 ASCII bytes.
 ///
 /// Returns [`None`] if the input has an odd length or contains a non-Base16
 /// byte.
+#[cfg(feature = "alloc")]
 #[must_use = "the decoding result should be handled"]
 #[inline]
 pub fn try_decode_base16(base16: &[u8]) -> Option<Box<[u8]>> {
-    BASE16_MIXED.try_decode_base16(base16)
+    BASE16_MIXED.try_decode_boxed(base16)
 }
 
 /// Decodes lowercase Base16 ASCII bytes.
 ///
 /// Returns [`None`] if the input has an odd length or contains any byte outside
 /// lowercase Base16, including an uppercase letter.
+#[cfg(feature = "alloc")]
 #[must_use = "the decoding result should be handled"]
 #[inline]
 pub fn try_decode_base16lower(base16: &[u8]) -> Option<Box<[u8]>> {
-    BASE16_LOWER.try_decode_base16(base16)
+    BASE16_LOWER.try_decode_boxed(base16)
 }
 
 /// Decodes uppercase Base16 ASCII bytes.
 ///
 /// Returns [`None`] if the input has an odd length or contains any byte outside
 /// uppercase Base16, including a lowercase letter.
+#[cfg(feature = "alloc")]
 #[must_use = "the decoding result should be handled"]
 #[inline]
 pub fn try_decode_base16upper(base16: &[u8]) -> Option<Box<[u8]>> {
-    BASE16_UPPER.try_decode_base16(base16)
+    BASE16_UPPER.try_decode_boxed(base16)
+}
+
+/// Returns the exact decoded length of a structurally valid Base16 slice.
+///
+/// Each pair of Base16 symbols decodes to one byte. This function returns
+/// [`None`] for an odd input length, but does not validate that the bytes are
+/// part of a Base16 alphabet.
+#[must_use = "the decoded size should be used"]
+#[inline]
+pub fn decoded_length_base16(src: &[u8]) -> Option<usize> {
+    let len = src.len();
+    if len.is_multiple_of(2) {
+        Some(len / 2)
+    } else {
+        None
+    }
+}
+
+/// Decodes mixed-case Base16 ASCII from `src` into the beginning of `dst`.
+///
+/// Returns the initialized prefix of `dst`, or [`None`] if `src` has an odd
+/// length, contains a non-Base16 byte, or `dst` is too short. The returned
+/// slice has [`decoded_length_base16(src)`](decoded_length_base16) bytes. This
+/// function does not allocate.
+///
+/// If decoding returns [`None`] because of an invalid byte, `dst` may have
+/// been partially modified.
+#[must_use = "the decoded slice should be used"]
+#[inline]
+pub fn try_decode_from_base16<'a>(src: &[u8], dst: &'a mut [u8]) -> Option<&'a [u8]> {
+    BASE16_MIXED.try_decode_into(src, dst)
+}
+
+/// Decodes lowercase Base16 ASCII from `src` into the beginning of `dst`.
+///
+/// Returns the initialized prefix of `dst`, or [`None`] if `src` has an odd
+/// length, contains a byte outside the lowercase Base16 alphabet, or `dst` is
+/// too short. Decimal digits are accepted, but uppercase letters are rejected.
+/// This function does not allocate.
+///
+/// If decoding returns [`None`] because of an invalid byte, `dst` may have
+/// been partially modified.
+#[must_use = "the decoded slice should be used"]
+#[inline]
+pub fn try_decode_from_base16lower<'a>(src: &[u8], dst: &'a mut [u8]) -> Option<&'a [u8]> {
+    BASE16_LOWER.try_decode_into(src, dst)
+}
+
+/// Decodes uppercase Base16 ASCII from `src` into the beginning of `dst`.
+///
+/// Returns the initialized prefix of `dst`, or [`None`] if `src` has an odd
+/// length, contains a byte outside the uppercase Base16 alphabet, or `dst` is
+/// too short. Decimal digits are accepted, but lowercase letters are rejected.
+/// This function does not allocate.
+///
+/// If decoding returns [`None`] because of an invalid byte, `dst` may have
+/// been partially modified.
+#[must_use = "the decoded slice should be used"]
+#[inline]
+pub fn try_decode_from_base16upper<'a>(src: &[u8], dst: &'a mut [u8]) -> Option<&'a [u8]> {
+    BASE16_UPPER.try_decode_into(src, dst)
 }
 
 struct Decoder<'d> {
@@ -110,12 +183,14 @@ impl<'d> Decoder<'d> {
         }
     }
 
+    #[cfg(feature = "alloc")]
     #[inline]
-    fn try_decode_base16_string(&self, base16: &str) -> Option<Box<[u8]>> {
-        self.try_decode_base16(base16.as_bytes())
+    fn try_decode_string(&self, base16: &str) -> Option<Box<[u8]>> {
+        self.try_decode_boxed(base16.as_bytes())
     }
 
-    fn try_decode_base16(&self, base16: &[u8]) -> Option<Box<[u8]>> {
+    #[cfg(feature = "alloc")]
+    fn try_decode_boxed(&self, base16: &[u8]) -> Option<Box<[u8]>> {
         // Empty inputs result in empty outputs.
         if base16.is_empty() {
             return Some(Vec::<u8>::new().into_boxed_slice());
@@ -126,28 +201,83 @@ impl<'d> Decoder<'d> {
             return None;
         }
 
-        let mut ret = Vec::<u8>::with_capacity(base16.len() / 2);
-        let (pairs, []) = base16.as_chunks::<2>() else {
-            unreachable!("base16 slice always a multiple of two")
-        };
+        let mut dst = Box::<[u8]>::new_uninit_slice(base16.len() / 2);
 
-        for &[hi, lo] in pairs {
-            let hi = self.check_and_decode_base16_byte(hi)?;
-            let lo = self.check_and_decode_base16_byte(lo)?;
-            ret.push(hi << 4 | lo);
+        // SAFETY:
+        //  - `dst` contains `base16.len() / 2` consecutive
+        //    `MaybeUninit<u8>` values.
+        //  - A `MaybeUninit<u8>` pointer is valid for writes through a `u8`
+        //    pointer.
+        //  - `base16` has an even length.
+        unsafe {
+            let written = self.decode_base16_payload(base16, dst.as_mut_ptr().cast::<u8>())?;
+
+            // INVARIANT: a successful decode initialized every element.
+            assert!(written == dst.len());
+            Some(dst.assume_init())
+        }
+    }
+
+    #[inline]
+    fn try_decode_into<'a>(&self, src: &[u8], dst: &'a mut [u8]) -> Option<&'a [u8]> {
+        if src.is_empty() {
+            return Some(&[]);
         }
 
-        Some(ret.into_boxed_slice())
+        // INVARIANT: input length must be a multiple of 2
+        if !src.len().is_multiple_of(2) {
+            return None;
+        }
+
+        // INVARIANT: dst must be at least equal to src.len() / 2
+        if dst.len() < src.len() / 2 {
+            return None;
+        }
+
+        // SAFETY:
+        //  - `dst.len() >= src.len() / 2`.
+        //  - `src.len()` is evenly divisible by two.
+        let written = unsafe { self.decode_base16_payload(src, dst.as_mut_ptr())? };
+
+        // INVARIANT: the number of bytes written should be exactly src.len() / 2
+        assert!(written == src.len() / 2);
+        Some(&dst[..written])
+    }
+
+    // SAFETY:
+    //  - `dst` must point to at least `src.len() / 2` consecutive, writable
+    //    bytes.
+    //  - `src.len()` must be evenly divisible by two.
+    //
+    // Returns the number of bytes written to `dst`.
+    #[inline]
+    unsafe fn decode_base16_payload(&self, src: &[u8], dst: *mut u8) -> Option<usize> {
+        let mut i = 0usize;
+
+        // SAFETY:
+        //  - The caller guarantees `src` is a multiple of two.
+        //  - The caller guarantees enough writable storage for one output byte
+        //    per input pair.
+        unsafe {
+            for &[hi, lo] in src.as_chunks_unchecked::<2>() {
+                let hi = self.check_and_decode_base16_byte(hi)?;
+                let lo = self.check_and_decode_base16_byte(lo)?;
+                dst.add(i).write(hi << 4 | lo);
+                i += 1;
+            }
+        }
+        Some(i)
     }
 
     #[inline]
     fn check_and_decode_base16_byte(&self, byte: u8) -> Option<u8> {
-        if !(self.min_ascii..self.max_ascii).contains(&(byte as usize)) {
+        let i = byte as usize;
+        if !(self.min_ascii..self.max_ascii).contains(&i) {
             // Byte is outside this base16 decoder's ASCII range.
             return None;
         }
 
-        let i = byte as usize - self.min_ascii;
+        let i = i - self.min_ascii;
 
         // SAFETY: byte - MIN_ASCII is within [0, MAX_ASCII - MIN_ASCII).
         let byte = unsafe { *self.decoder.get_unchecked(i) };
@@ -162,11 +292,13 @@ impl<'d> Decoder<'d> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::{ENCODER_LOWER, ENCODER_UPPER};
+    use super::super::{ENCODER_LOWER, ENCODER_UPPER, MAX_ASCII, MIN_ASCII};
     use super::*;
 
+    #[cfg(feature = "alloc")]
     type Decode = fn(&[u8]) -> Option<Box<[u8]>>;
 
+    #[cfg(feature = "alloc")]
     #[test]
     fn mixed_case_decoder_accepts_lowercase_uppercase_and_mixed_input() {
         for encoded in ["deadbeef", "DEADBEEF", "dEaDbEeF"] {
@@ -181,6 +313,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "alloc")]
     #[test]
     fn strict_decoders_accept_only_their_selected_case() {
         let expected = Some([0xde, 0xad, 0xbe, 0xef].as_slice());
@@ -211,6 +344,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "alloc")]
     #[test]
     fn every_decoder_rejects_malformed_input() {
         let decoders: &[(&str, Decode)] = &[
@@ -230,12 +364,99 @@ mod tests {
     }
 
     #[test]
+    fn decoded_lengths_require_complete_symbol_pairs() {
+        assert_eq!(decoded_length_base16(b""), Some(0));
+        assert_eq!(decoded_length_base16(b"0"), None);
+        assert_eq!(decoded_length_base16(b"00"), Some(1));
+        assert_eq!(decoded_length_base16(b"001"), None);
+        assert_eq!(decoded_length_base16(b"0011"), Some(2));
+
+        // Length calculation deliberately does not validate the alphabet.
+        assert_eq!(decoded_length_base16(b"zz"), Some(1));
+    }
+
+    #[test]
+    fn slice_decoders_write_only_the_returned_prefix() {
+        for encoded in [b"deadbeef", b"DEADBEEF", b"dEaDbEeF"] {
+            let mut dst = [b'!'; 6];
+            assert_eq!(
+                try_decode_from_base16(encoded, &mut dst),
+                Some([0xde, 0xad, 0xbe, 0xef].as_slice()),
+            );
+            assert_eq!(&dst[4..], b"!!");
+        }
+
+        let mut lower = [0; 4];
+        assert_eq!(
+            try_decode_from_base16lower(b"deadbeef", &mut lower),
+            Some([0xde, 0xad, 0xbe, 0xef].as_slice()),
+        );
+
+        let mut upper = [0; 4];
+        assert_eq!(
+            try_decode_from_base16upper(b"DEADBEEF", &mut upper),
+            Some([0xde, 0xad, 0xbe, 0xef].as_slice()),
+        );
+
+        let mut untouched = [b'x'; 1];
+        assert_eq!(
+            try_decode_from_base16(b"", &mut untouched),
+            Some([].as_slice())
+        );
+        assert_eq!(untouched, [b'x']);
+    }
+
+    #[test]
+    fn slice_decoders_reject_bad_alignment_alphabet_case_and_capacity() {
+        let mut dst = [0; 4];
+
+        assert_eq!(try_decode_from_base16(b"0", &mut dst), None);
+        assert_eq!(try_decode_from_base16(b"gg", &mut dst), None);
+        assert_eq!(try_decode_from_base16lower(b"FF", &mut dst), None);
+        assert_eq!(try_decode_from_base16upper(b"ff", &mut dst), None);
+
+        let mut short = [0; 3];
+        assert_eq!(try_decode_from_base16(b"deadbeef", &mut short), None);
+    }
+
+    #[test]
+    fn slice_decoders_cover_every_output_byte() {
+        let mut input = [0u8; 256];
+        for (byte, value) in input.iter_mut().zip(u8::MIN..=u8::MAX) {
+            *byte = value;
+        }
+
+        let mut lower = [0; 512];
+        let lower = super::super::try_encode_into_base16(&input, &mut lower).unwrap();
+        let mut decoded = [0; 256];
+        assert_eq!(
+            try_decode_from_base16(lower, &mut decoded),
+            Some(input.as_slice()),
+        );
+        assert_eq!(
+            try_decode_from_base16lower(lower, &mut decoded),
+            Some(input.as_slice()),
+        );
+
+        let mut upper = [0; 512];
+        let upper = super::super::try_encode_into_base16upper(&input, &mut upper).unwrap();
+        assert_eq!(
+            try_decode_from_base16(upper, &mut decoded),
+            Some(input.as_slice()),
+        );
+        assert_eq!(
+            try_decode_from_base16upper(upper, &mut decoded),
+            Some(input.as_slice()),
+        );
+    }
+
+    #[test]
     fn tables_preserve_unsafe_indexing_invariants() {
         fn assert_invariants(decoder: &Decoder<'_>, alphabets: &[&[u8]]) {
             assert!(decoder.max_ascii > decoder.min_ascii);
             assert_eq!(decoder.max_ascii - decoder.min_ascii, decoder.decoder.len());
 
-            let mut seen = vec![false; decoder.decoder.len()];
+            let mut seen = [false; MAX_ASCII - MIN_ASCII];
             for alphabet in alphabets {
                 for (digit, &ascii) in alphabet.iter().enumerate() {
                     let ascii = ascii as usize;
@@ -272,6 +493,7 @@ mod tests {
         assert_invariants(&BASE16_UPPER, &[&ENCODER_UPPER]);
     }
 
+    #[cfg(feature = "alloc")]
     #[test]
     fn arbitrary_byte_slices_roundtrip_through_the_matching_decoders() {
         for len in 0usize..=64 {

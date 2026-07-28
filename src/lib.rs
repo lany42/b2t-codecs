@@ -2,24 +2,36 @@
 // SPDX-FileCopyrightText: 2026 Lany Atwood <lany@colorized.life>
 //! # b2t-codecs
 //!
-//! Binary-to-text codecs for Base16, Base32, Base64, Ascii85, Adobe85, and Z85.
+//! Freestanding binary-to-text codecs for Base16, Base32, Base64, and Base85.
 //!
-//! The crate provides slice-based encoding and decoding functions as well as
-//! sealed conversion traits for fixed-width integer values. Encoders produce
-//! ASCII as either [`String`] or boxed byte slices, and fallible decoders return
-//! [`None`] for malformed or non-canonical input.
+//! The `alloc` feature is enabled by default. To use only allocation-free APIs,
+//! disable default features in your `Cargo.toml`:
+//!
+//! ```yaml
+//! [dependencies]
+//! b2t-codecs = { version = "1", default-features = false }
+//! ```
 //!
 //! ## Quick Start
 //!
 //! ```rust
-//! use b2t_codecs::{encode_base64_string, try_decode_base64_string};
+//! use b2t_codecs::{try_decode_from_base16, try_encode_into_base16};
 //!
-//! let encoded = encode_base64_string(b"Rust is great!");
-//! assert_eq!(encoded, "UnVzdCBpcyBncmVhdCE=");
+//! let mut encoded = [0; 28];
+//! let mut decoded = [0; 14];
+//! let encoded = try_encode_into_base16(b"Rust is great!", &mut encoded).unwrap();
+//! let decoded = try_decode_from_base16(encoded, &mut decoded);
 //!
-//! let decoded = &*try_decode_base64_string(&encoded).unwrap();
-//! assert_eq!(decoded, b"Rust is great!");
+//! assert_eq!(encoded, b"5275737420697320677265617421");
+//! assert_eq!(decoded, Some(b"Rust is great!".as_slice()));
 //! ```
+//!
+//! ## Todo
+//!
+//! - [x] No-alloc API for Base16, v1.1
+//! - [ ] No-alloc API for Base32, v1.2
+//! - [ ] No-alloc API for Base64, v1.3
+//! - [ ] No-alloc API for Base85, v1.4
 //!
 //! ## Codecs
 //!
@@ -60,6 +72,11 @@
 //! \* Canonical Base32, Base32Hex, and Base64URL output includes reserved `=`
 //! padding. Remove it to make the output URL-safe as-is, or percent-encode it
 //! with the rest of the URL component.
+//!
+//! ## License
+//!
+//! Licensed under the GNU Affero General Public License, version 3 only
+//! (`AGPL-3.0-only`).
 
 #![no_std]
 
@@ -70,24 +87,36 @@ mod codecs;
 
 pub use codecs::base16;
 pub use codecs::base16::{
-    Base16, encode_base16, encode_base16_string, encode_base16upper, encode_base16upper_string,
+    Base16, decoded_length_base16, encoded_length_base16, try_decode_from_base16,
+    try_decode_from_base16lower, try_decode_from_base16upper, try_encode_into_base16,
+    try_encode_into_base16upper,
+};
+#[cfg(feature = "alloc")]
+pub use codecs::base16::{
+    encode_base16, encode_base16_string, encode_base16upper, encode_base16upper_string,
     try_decode_base16, try_decode_base16_string, try_decode_base16lower,
     try_decode_base16lower_string, try_decode_base16upper, try_decode_base16upper_string,
 };
+#[cfg(feature = "alloc")]
 pub use codecs::base32;
+#[cfg(feature = "alloc")]
 pub use codecs::base32::{
     Base32, Base32Hex, encode_base32, encode_base32_string, encode_base32hex,
     encode_base32hex_string, try_decode_base32, try_decode_base32_string, try_decode_base32hex,
     try_decode_base32hex_string,
 };
+#[cfg(feature = "alloc")]
 pub use codecs::base64;
+#[cfg(feature = "alloc")]
 pub use codecs::base64::{
     Base64, Base64Url, encode_base64, encode_base64_string, encode_base64url,
     encode_base64url_string, trim_base64_end_padding, try_decode_base64, try_decode_base64_string,
     try_decode_base64ext, try_decode_base64ext_string, try_decode_base64url,
     try_decode_base64url_string, try_decode_base64urlext, try_decode_base64urlext_string,
 };
+#[cfg(feature = "alloc")]
 pub use codecs::base85;
+#[cfg(feature = "alloc")]
 pub use codecs::base85::{
     Adobe85, Base85, Z85, encode_adobe85, encode_adobe85_string, try_decode_adobe85,
     try_decode_adobe85_string, try_decode_ascii85, try_decode_ascii85_string, try_decode_z85,

@@ -2,6 +2,14 @@
 
 Freestanding binary-to-text codecs for Base16, Base32, Base64, and Base85.
 
+The `alloc` feature is enabled by default. To use only allocation-free APIs,
+disable default features in your `Cargo.toml`:
+
+```yaml
+[dependencies]
+b2t-codecs = { version = "1", default-features = false }
+```
+
 ## Quick Start
 
 ```rust
@@ -13,6 +21,13 @@ assert_eq!(encoded, "UnVzdCBpcyBncmVhdCE=");
 let decoded = &*try_decode_base64_string(&encoded).unwrap();
 assert_eq!(decoded, b"Rust is great!");
 ```
+
+## Todo
+
+- [x] No-alloc API for Base16, v1.1
+- [ ] No-alloc API for Base32, v1.2
+- [ ] No-alloc API for Base64, v1.3
+- [ ] No-alloc API for Base85, v1.4
 
 ## Codecs
 

@@ -25,6 +25,9 @@ const Z85: Encoder = const {
     Encoder::from_alphabet(&ENCODER_Z85)
 };
 
+#[cfg(feature = "alloc")]
+use alloc::{boxed::Box, string::String, vec::Vec};
+
 /// Encodes `bytes` as a raw Adobe85 string.
 ///
 /// Full zero quanta are compressed as `z`, and a final partial quantum uses
@@ -295,7 +298,7 @@ mod tests {
             &[("ASCII85", try_encode_ascii85), ("Z85", try_encode_z85)];
 
         for len in [1, 2, 3, 5, 6, 7] {
-            let input = vec![0u8; len];
+            let input = alloc::vec![0u8; len];
             for &(name, encode) in encoders {
                 assert_eq!(encode(&input), None, "{name} accepted {len} bytes");
             }

@@ -7,13 +7,15 @@
 //! accept only their selected letter case.
 //!
 //! ```rust
-//! use b2t_codecs::base16::{encode_base16_string, try_decode_base16_string};
+//! use b2t_codecs::base16::{try_decode_from_base16, try_encode_into_base16};
 //!
-//! let encoded = encode_base16_string(b"Hello,World!");
-//! assert_eq!(encoded, "48656c6c6f2c576f726c6421");
+//! let mut encoded = [0; 64];
+//! let mut decoded = [0; 64];
+//! let encoded = try_encode_into_base16(b"Hello,World!", &mut encoded).unwrap();
+//! let decoded = try_decode_from_base16(encoded, &mut decoded);
 //!
-//! let decoded = &*try_decode_base16_string(&encoded).unwrap();
-//! assert_eq!(decoded, b"Hello,World!");
+//! assert_eq!(encoded, b"48656c6c6f2c576f726c6421");
+//! assert_eq!(decoded, Some(b"Hello,World!".as_slice()));
 //! ```
 // BASE16 CODEC
 // The default encoder emits lowercase ASCII, while the default decoder accepts
@@ -23,10 +25,22 @@ mod dec;
 mod enc;
 
 pub use dec::{
+    decoded_length_base16, try_decode_from_base16, try_decode_from_base16lower,
+    try_decode_from_base16upper,
+};
+
+#[cfg(feature = "alloc")]
+pub use dec::{
     try_decode_base16, try_decode_base16_string, try_decode_base16lower,
     try_decode_base16lower_string, try_decode_base16upper, try_decode_base16upper_string,
 };
+
+#[cfg(feature = "alloc")]
 pub use enc::{encode_base16, encode_base16_string, encode_base16upper, encode_base16upper_string};
+pub use enc::{encoded_length_base16, try_encode_into_base16, try_encode_into_base16upper};
+
+#[cfg(feature = "alloc")]
+use alloc::{boxed::Box, string::String};
 
 // Any 4-bit nibble can index these encoder arrays.
 // b0000 == 0, b1111 == 15
@@ -80,13 +94,30 @@ mod sealed {
 /// primitive integer types. Values are encoded from their big-endian bytes at
 /// their full type width.
 pub trait Base16: sealed::Sealed + Copy {
+    /// The fixed width of this integer type in decoded bytes.
+    ///
+    /// Its full-width Base16 representation contains exactly `Self::SIZE * 2`
+    /// ASCII bytes.
+    const SIZE: usize;
+
     /// Returns the lowercase Base16 encoding of this value.
+    #[cfg(feature = "alloc")]
     #[must_use = "the encoded value should be used"]
     fn as_base16_string(&self) -> String;
 
     /// Returns the lowercase Base16 ASCII bytes for this value.
+    #[cfg(feature = "alloc")]
     #[must_use = "the encoded value should be used"]
     fn as_base16(&self) -> Box<[u8]>;
+
+    /// Encodes this value as full-width, lowercase Base16 into `dst`.
+    ///
+    /// Returns the initialized prefix of `dst`, or [`None`] if `dst` is shorter
+    /// than `Self::SIZE * 2`. A short destination is left unchanged. Any bytes
+    /// after the encoded prefix are also left unchanged. This method does not
+    /// allocate.
+    #[must_use = "the encoding result should be handled"]
+    fn try_as_base16_into<'a>(&self, dst: &'a mut [u8]) -> Option<&'a [u8]>;
 
     /// Decodes a mixed-case Base16 string into a value of exactly this type's width.
     ///
@@ -108,14 +139,23 @@ macro_rules! impl_base16 {
             impl sealed::Sealed for $ty {}
 
             impl Base16 for $ty {
+                const SIZE: usize = core::mem::size_of::<$ty>();
+
+                #[cfg(feature = "alloc")]
                 #[inline]
                 fn as_base16_string(&self) -> String {
                     encode_base16_string(&self.to_be_bytes())
                 }
 
+                #[cfg(feature = "alloc")]
                 #[inline]
                 fn as_base16(&self) -> Box<[u8]> {
                     encode_base16(&self.to_be_bytes())
+                }
+
+                #[inline]
+                fn try_as_base16_into<'a>(&self, dst: &'a mut [u8]) -> Option<&'a [u8]> {
+                    try_encode_into_base16(&self.to_be_bytes(), dst)
                 }
 
                 #[inline]
@@ -125,16 +165,19 @@ macro_rules! impl_base16 {
 
                 #[inline]
                 fn try_from_base16(base16: &[u8]) -> Option<Self> {
-                    const SIZE: usize = std::mem::size_of::<$ty>() * 2;
-                    if base16.len() != SIZE {
+                    if decoded_length_base16(base16)? != Self::SIZE {
                         return None;
                     }
 
-                    if let Some(bytes) = try_decode_base16(base16) {
+                    let mut dst = [0u8; Self::SIZE];
+                    if let Some(bytes) = try_decode_from_base16(base16, &mut dst) {
+                        if bytes.len() != Self::SIZE {
+                            return None;
+                        }
+
                         let bytes = bytes.as_ref().try_into().ok()?;
                         return Some(Self::from_be_bytes(bytes));
                     }
-
                     None
                 }
             }
@@ -147,8 +190,10 @@ impl_base16!(u8, u16, u32, u64, u128, i8, i16, i32, i64, i128);
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fmt::Debug;
+    #[cfg(feature = "alloc")]
+    use core::fmt::Debug;
 
+    #[cfg(feature = "alloc")]
     fn assert_primitive_encoding<T>(value: T, expected: &str)
     where
         T: Base16 + Debug + Eq,
@@ -163,6 +208,7 @@ mod tests {
         assert_eq!(T::try_from_base16(&base16[..base16.len() - 1]), None);
     }
 
+    #[cfg(feature = "alloc")]
     #[test]
     fn integer_primitive_encodings_are_pinned() {
         macro_rules! assert_min_and_max_encoding {
@@ -196,8 +242,47 @@ mod tests {
     #[test]
     fn integer_primitive_decoding_accepts_mixed_case_and_requires_exact_width() {
         assert_eq!(u32::try_from_base16(b"dEaDbEeF"), Some(0xdead_beef));
+        assert_eq!(u32::try_from_base16_string("dEaDbEeF"), Some(0xdead_beef));
         assert_eq!(u32::try_from_base16(b"0000"), None);
         assert_eq!(u32::try_from_base16(b"00000000"), Some(0));
         assert_eq!(u32::try_from_base16(b"0000000000000000"), None);
+    }
+
+    #[test]
+    fn integer_byte_sizes_are_pinned() {
+        assert_eq!(u8::SIZE, 1);
+        assert_eq!(u16::SIZE, 2);
+        assert_eq!(u32::SIZE, 4);
+        assert_eq!(u64::SIZE, 8);
+        assert_eq!(u128::SIZE, 16);
+
+        assert_eq!(i8::SIZE, 1);
+        assert_eq!(i16::SIZE, 2);
+        assert_eq!(i32::SIZE, 4);
+        assert_eq!(i64::SIZE, 8);
+        assert_eq!(i128::SIZE, 16);
+    }
+
+    #[test]
+    fn no_alloc_integer_encoding_is_full_width_and_preserves_the_tail() {
+        let mut dst = [b'!'; 10];
+        assert_eq!(
+            0xdead_beefu32.try_as_base16_into(&mut dst),
+            Some(b"deadbeef".as_slice()),
+        );
+        assert_eq!(&dst[8..], b"!!");
+
+        let mut signed = [0; 4];
+        assert_eq!(
+            i16::MIN.try_as_base16_into(&mut signed),
+            Some(b"8000".as_slice()),
+        );
+    }
+
+    #[test]
+    fn no_alloc_integer_encoding_returns_none_for_a_short_destination() {
+        let mut dst = [b'!'; 7];
+        assert_eq!(0xdead_beefu32.try_as_base16_into(&mut dst), None);
+        assert_eq!(dst, [b'!'; 7]);
     }
 }

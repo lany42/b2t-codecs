@@ -28,6 +28,9 @@ pub use dec::{
 };
 pub use enc::{encode_base32, encode_base32_string, encode_base32hex, encode_base32hex_string};
 
+#[cfg(feature = "alloc")]
+use alloc::{boxed::Box, string::String, vec::Vec};
+
 const ENCODER: [u8; 32] = [
     65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88,
     89, 90, 50, 51, 52, 53, 54, 55,
@@ -153,7 +156,7 @@ macro_rules! impl_base32 {
                 #[inline]
                 fn try_from_base32(base32: &[u8]) -> Option<Self> {
                     if let Some(bytes) = try_decode_base32(base32) {
-                        const SIZE: usize = std::mem::size_of::<$ty>();
+                        const SIZE: usize = core::mem::size_of::<$ty>();
                         if bytes.len() != SIZE {
                             return None;
                         }
@@ -185,7 +188,7 @@ macro_rules! impl_base32 {
                 #[inline]
                 fn try_from_base32hex(base32hex: &[u8]) -> Option<Self> {
                     if let Some(bytes) = try_decode_base32hex(base32hex) {
-                        const SIZE: usize = std::mem::size_of::<$ty>();
+                        const SIZE: usize = core::mem::size_of::<$ty>();
                         if bytes.len() != SIZE {
                             return None;
                         }
@@ -206,7 +209,7 @@ impl_base32!(u8, u16, u32, u64, u128, i8, i16, i32, i64, i128);
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fmt::Debug;
+    use alloc::fmt::Debug;
 
     fn assert_primitive_encoding<T>(value: T, expected: &str, expected_hex: &str)
     where

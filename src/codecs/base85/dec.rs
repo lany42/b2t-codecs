@@ -29,6 +29,9 @@ const Z85: Decoder = const {
     Decoder::from_table(&DECODER_Z85, MIN_ASCII_Z85, MAX_ASCII_Z85)
 };
 
+#[cfg(feature = "alloc")]
+use alloc::{boxed::Box, vec::Vec};
+
 /// Decodes a raw Adobe85 string.
 ///
 /// The decoder accepts compressed zero quanta and implicit final padding,
@@ -258,6 +261,8 @@ mod tests {
         MIN_ASCII_ASCII85, MIN_ASCII_Z85,
     };
     use super::*;
+
+    use alloc::vec;
 
     type Encode = fn(&[u8]) -> Option<Box<[u8]>>;
     type Decode = fn(&[u8]) -> Option<Box<[u8]>>;
@@ -532,7 +537,7 @@ mod tests {
                     );
 
                     let with_whitespace =
-                        std::str::from_utf8(&with_whitespace).expect("input remains ASCII");
+                        alloc::str::from_utf8(&with_whitespace).expect("input remains ASCII");
                     assert_eq!(
                         try_decode_adobe85_string(with_whitespace).as_deref(),
                         Some(input),

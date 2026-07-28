@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: AGPL-3.0-only
+# SPDX-FileCopyrightText: 2026 Lany Atwood <lany@colorized.life>
+set -euo pipefail
+
+repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "${repo_root}"
+
+# One seed catches deterministic UB without multiplying the runtime. Widen the
+# range for a deeper local run, for example with MIRI_SEEDS=0..4.
+miri_seeds="${MIRI_SEEDS:-0..1}"
+
+# Keep Miri's isolation, leak checker, validity checks, data-race detector, and
+# weak-memory emulation enabled. The remaining flags add the strictest supported
+# checks and retain every failing seed so one failure does not hide others.
+common_miri_flags="\
+-Zmiri-backtrace=full \
+-Zmiri-many-seeds=${miri_seeds} \
+-Zmiri-many-seeds-keep-going \
+-Zmiri-recursive-validation \
+-Zmiri-strict-provenance \
+-Zmiri-symbolic-alignment-check"
+
+# Randomized layouts catch accidental reliance on unspecified Rust layouts;
+# the additional const checks catch UB while evaluating constants.
+export RUSTFLAGS="-Zextra-const-ub-checks -Zrandomize-layout"
+export RUSTDOCFLAGS="${RUSTFLAGS}"
+export CCACHE_DISABLE=1
+
+run_miri_tests() {
+    local label="$1"
+    local flags="$2"
+    shift 2
+
+    echo "==> Miri with ${label} (${miri_seeds})"
+    MIRIFLAGS="${flags}" \
+        cargo +nightly miri test --locked --workspace "$@"
+}
+
+run_miri_tests "Stacked Borrows, default features" \
+    "${common_miri_flags}" "$@"
+run_miri_tests "Stacked Borrows, no default features" \
+    "${common_miri_flags}" --no-default-features "$@"
+run_miri_tests "Tree Borrows and implicit writes, default features" \
+    "${common_miri_flags} \
+-Zmiri-tree-borrows \
+-Zmiri-tree-borrows-implicit-writes" "$@"
+run_miri_tests "Tree Borrows and implicit writes, no default features" \
+    "${common_miri_flags} \
+-Zmiri-tree-borrows \
+-Zmiri-tree-borrows-implicit-writes" --no-default-features "$@"

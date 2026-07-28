@@ -38,6 +38,9 @@ pub use enc::{
     try_encode_z85, try_encode_z85_string,
 };
 
+#[cfg(feature = "alloc")]
+use alloc::{boxed::Box, string::String};
+
 const ENCODER_Z85: [u8; 85] = [
     48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107,
     108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 65, 66, 67, 68, 69,
@@ -206,7 +209,7 @@ macro_rules! impl_base85 {
                     // ex.  u32/i32     -> 5 ASCII
                     //      u64/i64     -> 10 ASCII
                     //      u128/i128   -> 20 ASCII
-                    const SIZE: usize = std::mem::size_of::<$ty>() * 5 / 4;
+                    const SIZE: usize = core::mem::size_of::<$ty>() * 5 / 4;
                     if base85.len() != SIZE {
                         return None;
                     }
@@ -244,7 +247,7 @@ macro_rules! impl_base85 {
                     // ex.  u32/i32     -> 5 ASCII
                     //      u64/i64     -> 10 ASCII
                     //      u128/i128   -> 20 ASCII
-                    const SIZE: usize = std::mem::size_of::<$ty>() * 5 / 4;
+                    const SIZE: usize = core::mem::size_of::<$ty>() * 5 / 4;
                     if z85.len() != SIZE {
                         return None;
                     }
@@ -285,7 +288,7 @@ macro_rules! impl_adobe85 {
                 #[inline]
                 fn try_from_adobe85(adobe85: &[u8]) -> Option<Self> {
                     if let Some(bytes) = try_decode_adobe85(adobe85) {
-                        const SIZE: usize = std::mem::size_of::<$ty>();
+                        const SIZE: usize = core::mem::size_of::<$ty>();
                         if bytes.len() != SIZE {
                             return None;
                         }
@@ -311,7 +314,7 @@ impl_base85!(u32, u64, u128, i32, i64, i128);
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fmt::Debug;
+    use alloc::fmt::Debug;
 
     fn assert_primitive_roundtrip<T>(value: T)
     where
@@ -321,7 +324,7 @@ mod tests {
         let ascii85 = value.as_base85();
 
         assert_eq!(ascii85_string.as_bytes(), ascii85.as_ref());
-        assert_eq!(ascii85.len(), std::mem::size_of::<T>() * 5 / 4);
+        assert_eq!(ascii85.len(), core::mem::size_of::<T>() * 5 / 4);
         assert_eq!(T::try_from_base85_string(&ascii85_string), Some(value));
         assert_eq!(T::try_from_base85(&ascii85), Some(value));
 
@@ -329,7 +332,7 @@ mod tests {
         let z85 = value.as_z85();
 
         assert_eq!(z85_string.as_bytes(), z85.as_ref());
-        assert_eq!(z85.len(), std::mem::size_of::<T>() * 5 / 4);
+        assert_eq!(z85.len(), core::mem::size_of::<T>() * 5 / 4);
         assert_eq!(T::try_from_z85_string(&z85_string), Some(value));
         assert_eq!(T::try_from_z85(&z85), Some(value));
     }

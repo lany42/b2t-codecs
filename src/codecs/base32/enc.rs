@@ -22,6 +22,9 @@ const BASE32_HEX: Encoder = const {
     Encoder::from_alphabet(&ENCODER_HEX)
 };
 
+#[cfg(feature = "alloc")]
+use alloc::{boxed::Box, string::String, vec::Vec};
+
 /// Encodes `bytes` as a canonical padded Base32 string.
 ///
 /// # Panics
