@@ -18,7 +18,6 @@
 //! assert_eq!(decoded, Some(b"codec".as_slice()));
 //! ```
 pub mod base16;
-#[cfg(feature = "alloc")]
 pub mod base32;
 #[cfg(feature = "alloc")]
 pub mod base64;

@@ -6,11 +6,18 @@
 //! with `=` symbols.
 //!
 //! ```rust
-//! use b2t_codecs::base32::{encode_base32_string, encode_base32hex_string};
+//! use b2t_codecs::base32::{try_encode_into_base32, try_encode_into_base32hex};
 //!
-//! assert_eq!(encode_base32_string(b"foo"), "MZXW6===");
-//! assert_eq!(encode_base32hex_string(b"foo"), "CPNMU===");
+//! let mut base32 = [0; 8];
+//! let mut base32hex = [0; 8];
+//!
+//! assert_eq!(try_encode_into_base32(b"foo", &mut base32), Some(b"MZXW6===".as_slice()));
+//! assert_eq!(try_encode_into_base32hex(b"foo", &mut base32hex), Some(b"CPNMU===".as_slice()));
 //! ```
+
+#[cfg(feature = "alloc")]
+use alloc::{boxed::Box, string::String, vec::Vec};
+
 use crate::base32::BASE32_PAD;
 
 const BASE32_RFC: Encoder = const {
@@ -22,18 +29,23 @@ const BASE32_HEX: Encoder = const {
     Encoder::from_alphabet(&ENCODER_HEX)
 };
 
-#[cfg(feature = "alloc")]
-use alloc::{boxed::Box, string::String, vec::Vec};
+// replace unused encoded positions with b'=' based on tail length
+//  - 1 byte  => 2 encoded bytes and six pad
+//  - 2 bytes => 4 encoded bytes and four pad
+//  - 3 bytes => 5 encoded bytes and three pad
+//  - 4 bytes => 7 encoded bytes and one pad
+const BASE32_PADS: [usize; 5] = [0, 2, 4, 5, 7];
 
 /// Encodes `bytes` as a canonical padded Base32 string.
 ///
 /// # Panics
 ///
 /// Panics if the encoded length cannot be represented as a [`usize`].
+#[cfg(feature = "alloc")]
 #[must_use = "the encoded value should be used"]
 #[inline]
 pub fn encode_base32_string(bytes: &[u8]) -> String {
-    BASE32_RFC.encode_base32_string(bytes)
+    BASE32_RFC.encode_string(bytes)
 }
 
 /// Encodes `bytes` as a canonical padded Base32Hex string.
@@ -41,10 +53,11 @@ pub fn encode_base32_string(bytes: &[u8]) -> String {
 /// # Panics
 ///
 /// Panics if the encoded length cannot be represented as a [`usize`].
+#[cfg(feature = "alloc")]
 #[must_use = "the encoded value should be used"]
 #[inline]
 pub fn encode_base32hex_string(bytes: &[u8]) -> String {
-    BASE32_HEX.encode_base32_string(bytes)
+    BASE32_HEX.encode_string(bytes)
 }
 
 /// Encodes `bytes` as canonical padded Base32 ASCII bytes.
@@ -52,10 +65,11 @@ pub fn encode_base32hex_string(bytes: &[u8]) -> String {
 /// # Panics
 ///
 /// Panics if the encoded length cannot be represented as a [`usize`].
+#[cfg(feature = "alloc")]
 #[must_use = "the encoded value should be used"]
 #[inline]
 pub fn encode_base32(bytes: &[u8]) -> Box<[u8]> {
-    BASE32_RFC.encode_base32(bytes)
+    BASE32_RFC.encode_boxed(bytes)
 }
 
 /// Encodes `bytes` as canonical padded Base32Hex ASCII bytes.
@@ -63,10 +77,61 @@ pub fn encode_base32(bytes: &[u8]) -> Box<[u8]> {
 /// # Panics
 ///
 /// Panics if the encoded length cannot be represented as a [`usize`].
+#[cfg(feature = "alloc")]
 #[must_use = "the encoded value should be used"]
 #[inline]
 pub fn encode_base32hex(bytes: &[u8]) -> Box<[u8]> {
-    BASE32_HEX.encode_base32(bytes)
+    BASE32_HEX.encode_boxed(bytes)
+}
+
+/// Returns the exact number of bytes needed to encode `bytes` as padded Base32.
+///
+/// Base32 emits eight ASCII bytes for every complete or partial five-byte
+/// input quantum.
+///
+/// # Panics
+///
+/// Panics if the encoded length cannot be represented as a [`usize`].
+#[must_use = "the encoded size should be used"]
+#[inline]
+pub fn encoded_length_base32(bytes: &[u8]) -> usize {
+    bytes
+        .len()
+        .div_ceil(5)
+        .checked_mul(8)
+        .expect("base32 encoded length overflow")
+}
+
+/// Encodes `src` as canonical padded Base32 into the beginning of `dst`.
+///
+/// Returns the initialized prefix of `dst`, or [`None`] if `dst` is shorter
+/// than [`encoded_length_base32(src)`](encoded_length_base32). A short
+/// destination is left unchanged. Any bytes after the encoded prefix are also
+/// left unchanged. This function does not allocate.
+///
+/// # Panics
+///
+/// Panics if the encoded length cannot be represented as a [`usize`].
+#[must_use = "the encoding result should be handled"]
+#[inline]
+pub fn try_encode_into_base32<'a>(src: &[u8], dst: &'a mut [u8]) -> Option<&'a [u8]> {
+    BASE32_RFC.encode_into(src, dst)
+}
+
+/// Encodes `src` as canonical padded Base32Hex into the beginning of `dst`.
+///
+/// Returns the initialized prefix of `dst`, or [`None`] if `dst` is shorter
+/// than [`encoded_length_base32(src)`](encoded_length_base32). A short
+/// destination is left unchanged. Any bytes after the encoded prefix are also
+/// left unchanged. This function does not allocate.
+///
+/// # Panics
+///
+/// Panics if the encoded length cannot be represented as a [`usize`].
+#[must_use = "the encoding result should be handled"]
+#[inline]
+pub fn try_encode_into_base32hex<'a>(src: &[u8], dst: &'a mut [u8]) -> Option<&'a [u8]> {
+    BASE32_HEX.encode_into(src, dst)
 }
 
 struct Encoder<'e> {
@@ -82,40 +147,80 @@ impl<'e> Encoder<'e> {
         Self { encoder }
     }
 
+    #[cfg(feature = "alloc")]
     #[inline]
-    fn encode_base32_string(&self, bytes: &[u8]) -> String {
-        let encoded = self.encode_base32(bytes);
+    fn encode_string(&self, bytes: &[u8]) -> String {
+        let encoded = self.encode_boxed(bytes);
         // SAFETY: base32 bytes are ASCII, therefore always valid UTF-8.
         unsafe { String::from_utf8_unchecked(encoded.into_vec()) }
     }
 
-    fn encode_base32(&self, bytes: &[u8]) -> Box<[u8]> {
+    #[cfg(feature = "alloc")]
+    fn encode_boxed(&self, bytes: &[u8]) -> Box<[u8]> {
         if bytes.is_empty() {
             return Vec::<u8>::new().into_boxed_slice();
         }
 
-        // base32 encodes 8 ASCII bytes per 5 byte chunk
-        // and at most 8 extra bytes for a padded tail
-        let cap = bytes
-            .len()
-            .checked_mul(8)
-            .expect("base32 encoded length overflow")
-            / 5
-            + 8;
+        let payload_len = encoded_length_base32(bytes);
+        let mut dst = Box::<[u8]>::new_uninit_slice(payload_len);
 
         let (chunks, rem) = bytes.as_chunks::<5>();
-        let mut ret = Vec::<u8>::with_capacity(cap);
+        let mut written = 0usize;
 
         for &chunk in chunks {
-            ret.extend_from_slice(&self.encode_base32_full_chunk(chunk));
+            let chunk = self.encode_base32_full_chunk(chunk);
+            dst[written..written + 8].write_copy_of_slice(&chunk);
+            written += 8;
         }
 
         if !rem.is_empty() {
             let chunk = self.encode_base32_tail(rem);
-            ret.extend_from_slice(&chunk);
+            dst[written..written + 8].write_copy_of_slice(&chunk);
+            written += 8;
         }
 
-        ret.into_boxed_slice()
+        // SAFETY:
+        //  - `dst` contains `payload_len` consecutive `MaybeUninit<u8>` values.
+        //  - A `MaybeUninit<u8>` pointer is valid for writes through a `u8`
+        //    pointer.
+        //  - initialized exactly `payload_len` bytes.
+        unsafe {
+            // INVARIANT: all allocated elements were initialized.
+            // NOTE: dst.len() == payload_len
+            assert!(written == dst.len());
+            dst.assume_init()
+        }
+    }
+
+    fn encode_into<'a>(&self, src: &[u8], dst: &'a mut [u8]) -> Option<&'a [u8]> {
+        if src.is_empty() {
+            return Some(&dst[..0]);
+        }
+
+        let payload_len = encoded_length_base32(src);
+        if dst.len() < payload_len {
+            return None;
+        }
+
+        let (chunks, rem) = src.as_chunks::<5>();
+        let mut written = 0usize;
+
+        for &chunk in chunks {
+            let chunk = self.encode_base32_full_chunk(chunk);
+            dst[written..written + 8].copy_from_slice(&chunk);
+            written += 8;
+        }
+
+        if !rem.is_empty() {
+            let chunk = self.encode_base32_tail(rem);
+            dst[written..written + 8].copy_from_slice(&chunk);
+            written += 8;
+        }
+
+        // INVARIANT: `written == encoded_length_base32(src)`, therefore
+        // `written <= dst.len()`.
+        assert!(written == payload_len);
+        Some(&dst[..payload_len])
     }
 
     fn encode_base32_full_chunk(&self, chunk: [u8; 5]) -> [u8; 8] {
@@ -165,18 +270,7 @@ impl<'e> Encoder<'e> {
         padded[..len].copy_from_slice(tail);
         let mut encoded = self.encode_base32_full_chunk(padded);
 
-        // replace unused encoded positions with b'=' based on tail length
-        //  - 1 byte  => 2 encoded bytes and six pad
-        //  - 2 bytes => 4 encoded bytes and four pad
-        //  - 3 bytes => 5 encoded bytes and three pad
-        //  - 4 bytes => 7 encoded bytes and one pad
-        let pad_start = match len {
-            1 => 2,
-            2 => 4,
-            3 => 5,
-            4 => 7,
-            _ => unreachable!("len must be 1, 2, 3, or 4"),
-        };
+        let pad_start = BASE32_PADS[len];
         encoded[pad_start..].fill(BASE32_PAD);
 
         encoded
@@ -187,7 +281,9 @@ impl<'e> Encoder<'e> {
 mod tests {
     use super::*;
 
+    #[cfg(feature = "alloc")]
     type EncodeBytes = fn(&[u8]) -> Box<[u8]>;
+    #[cfg(feature = "alloc")]
     type EncodeString = fn(&[u8]) -> String;
 
     #[test]
@@ -203,11 +299,71 @@ mod tests {
         ];
 
         for &(plain, base32, base32hex) in vectors {
-            assert_eq!(encode_base32(plain).as_ref(), base32.as_bytes());
-            assert_eq!(encode_base32_string(plain), base32);
-            assert_eq!(encode_base32hex(plain).as_ref(), base32hex.as_bytes());
-            assert_eq!(encode_base32hex_string(plain), base32hex);
+            let mut dst = [0u8; 16];
+            assert_eq!(
+                try_encode_into_base32(plain, &mut dst),
+                Some(base32.as_bytes())
+            );
+
+            let mut dst = [0u8; 16];
+            assert_eq!(
+                try_encode_into_base32hex(plain, &mut dst),
+                Some(base32hex.as_bytes())
+            );
+
+            #[cfg(feature = "alloc")]
+            {
+                assert_eq!(encode_base32(plain).as_ref(), base32.as_bytes());
+                assert_eq!(encode_base32_string(plain), base32);
+                assert_eq!(encode_base32hex(plain).as_ref(), base32hex.as_bytes());
+                assert_eq!(encode_base32hex_string(plain), base32hex);
+            }
         }
+    }
+
+    #[test]
+    fn encoded_lengths_are_exact() {
+        assert_eq!(encoded_length_base32(b""), 0);
+        assert_eq!(encoded_length_base32(&[0]), 8);
+        assert_eq!(encoded_length_base32(&[0; 4]), 8);
+        assert_eq!(encoded_length_base32(&[0; 5]), 8);
+        assert_eq!(encoded_length_base32(&[0; 6]), 16);
+        assert_eq!(encoded_length_base32(&[0; 32]), 56);
+    }
+
+    #[test]
+    fn slice_encoders_write_only_the_returned_prefix() {
+        let mut base32 = [b'!'; 10];
+        assert_eq!(
+            try_encode_into_base32(b"foo", &mut base32),
+            Some(b"MZXW6===".as_slice()),
+        );
+        assert_eq!(&base32[8..], b"!!");
+
+        let mut base32hex = [b'?'; 10];
+        assert_eq!(
+            try_encode_into_base32hex(b"foo", &mut base32hex),
+            Some(b"CPNMU===".as_slice()),
+        );
+        assert_eq!(&base32hex[8..], b"??");
+
+        let mut untouched = [b'x'; 1];
+        let dst_ptr = untouched.as_ptr();
+        let encoded = try_encode_into_base32(b"", &mut untouched).unwrap();
+        assert!(encoded.is_empty());
+        assert_eq!(encoded.as_ptr(), dst_ptr);
+        assert_eq!(untouched, [b'x']);
+    }
+
+    #[test]
+    fn slice_encoders_return_none_for_a_short_destination() {
+        let mut base32 = [b'!'; 7];
+        assert_eq!(try_encode_into_base32(b"foo", &mut base32), None);
+        assert_eq!(base32, [b'!'; 7]);
+
+        let mut base32hex = [b'?'; 7];
+        assert_eq!(try_encode_into_base32hex(b"foo", &mut base32hex), None);
+        assert_eq!(base32hex, [b'?'; 7]);
     }
 
     #[test]
@@ -227,6 +383,7 @@ mod tests {
         assert_invariants(&BASE32_HEX);
     }
 
+    #[cfg(feature = "alloc")]
     #[test]
     fn byte_slices_of_arbitrary_lengths_encode_canonically() {
         let codecs: &[(&str, EncodeBytes, EncodeString, &[u8])] = &[

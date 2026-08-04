@@ -25,7 +25,7 @@ assert_eq!(decoded, b"Rust is great!");
 ## Todo
 
 - [x] No-alloc API for Base16, v2.0
-- [ ] No-alloc API for Base32, v2.1
+- [x] No-alloc API for Base32, v2.1
 - [ ] No-alloc API for Base64, v2.2
 - [ ] No-alloc API for Base85, v2.3
 

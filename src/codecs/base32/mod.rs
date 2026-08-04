@@ -7,13 +7,15 @@
 //! the final quantum.
 //!
 //! ```rust
-//! use b2t_codecs::base32::{encode_base32_string, try_decode_base32_string};
+//! use b2t_codecs::base32::{try_decode_from_base32, try_encode_into_base32};
 //!
-//! let encoded = encode_base32_string(b"Hello,World!");
-//! assert_eq!(encoded, "JBSWY3DPFRLW64TMMQQQ====");
+//! let mut encoded = [0; 24];
+//! let mut decoded = [0; 12];
+//! let encoded = try_encode_into_base32(b"Hello,World!", &mut encoded).unwrap();
+//! let decoded = try_decode_from_base32(encoded, &mut decoded);
 //!
-//! let decoded = &*try_decode_base32_string(&encoded).unwrap();
-//! assert_eq!(decoded, b"Hello,World!");
+//! assert_eq!(encoded, b"JBSWY3DPFRLW64TMMQQQ====");
+//! assert_eq!(decoded, Some(b"Hello,World!".as_slice()));
 //! ```
 // BASE32 CODEC
 // Canonical RFC 4648 Base32 and Base32Hex codecs. Strict decoders reject
@@ -23,10 +25,16 @@
 mod dec;
 mod enc;
 
+pub use dec::{decoded_length_base32, try_decode_from_base32, try_decode_from_base32hex};
+
+#[cfg(feature = "alloc")]
 pub use dec::{
     try_decode_base32, try_decode_base32_string, try_decode_base32hex, try_decode_base32hex_string,
 };
+
+#[cfg(feature = "alloc")]
 pub use enc::{encode_base32, encode_base32_string, encode_base32hex, encode_base32hex_string};
+pub use enc::{encoded_length_base32, try_encode_into_base32, try_encode_into_base32hex};
 
 #[cfg(feature = "alloc")]
 use alloc::{boxed::Box, string::String};
@@ -80,13 +88,30 @@ mod sealed {
 /// primitive integer types. Values are encoded from their big-endian bytes at
 /// their full type width.
 pub trait Base32: sealed::Sealed + Copy {
+    /// The fixed width of this integer type in decoded bytes.
+    ///
+    /// Its full-width padded Base32 representation contains exactly
+    /// `Self::SIZE.div_ceil(5) * 8` ASCII bytes.
+    const SIZE: usize;
+
     /// Returns the padded Base32 encoding of this value.
+    #[cfg(feature = "alloc")]
     #[must_use = "the encoded value should be used"]
     fn as_base32_string(&self) -> String;
 
     /// Returns the padded Base32 ASCII bytes for this value.
+    #[cfg(feature = "alloc")]
     #[must_use = "the encoded value should be used"]
     fn as_base32(&self) -> Box<[u8]>;
+
+    /// Encodes this value as full-width, padded Base32 into `dst`.
+    ///
+    /// Returns the initialized prefix of `dst`, or [`None`] if `dst` is shorter
+    /// than `Self::SIZE.div_ceil(5) * 8`. A short destination is left unchanged.
+    /// Any bytes after the encoded prefix are also left unchanged. This method
+    /// does not allocate.
+    #[must_use = "the encoding result should be handled"]
+    fn try_as_base32_into<'a>(&self, dst: &'a mut [u8]) -> Option<&'a [u8]>;
 
     /// Decodes a canonical Base32 string into a value of exactly this type's width.
     ///
@@ -109,13 +134,30 @@ pub trait Base32: sealed::Sealed + Copy {
 /// primitive integer types. Values are encoded from their big-endian bytes at
 /// their full type width.
 pub trait Base32Hex: sealed::Sealed + Copy {
+    /// The fixed width of this integer type in decoded bytes.
+    ///
+    /// Its full-width padded Base32Hex representation contains exactly
+    /// `Self::SIZE.div_ceil(5) * 8` ASCII bytes.
+    const SIZE: usize;
+
     /// Returns the padded Base32Hex encoding of this value.
+    #[cfg(feature = "alloc")]
     #[must_use = "the encoded value should be used"]
     fn as_base32hex_string(&self) -> String;
 
     /// Returns the padded Base32Hex ASCII bytes for this value.
+    #[cfg(feature = "alloc")]
     #[must_use = "the encoded value should be used"]
     fn as_base32hex(&self) -> Box<[u8]>;
+
+    /// Encodes this value as full-width, padded Base32Hex into `dst`.
+    ///
+    /// Returns the initialized prefix of `dst`, or [`None`] if `dst` is shorter
+    /// than `Self::SIZE.div_ceil(5) * 8`. A short destination is left unchanged.
+    /// Any bytes after the encoded prefix are also left unchanged. This method
+    /// does not allocate.
+    #[must_use = "the encoding result should be handled"]
+    fn try_as_base32hex_into<'a>(&self, dst: &'a mut [u8]) -> Option<&'a [u8]>;
 
     /// Decodes a canonical Base32Hex string into a value of this type's width.
     ///
@@ -138,14 +180,23 @@ macro_rules! impl_base32 {
             impl sealed::Sealed for $ty {}
 
             impl Base32 for $ty {
+                const SIZE: usize = core::mem::size_of::<$ty>();
+
+                #[cfg(feature = "alloc")]
                 #[inline]
                 fn as_base32_string(&self) -> String {
                     encode_base32_string(&self.to_be_bytes())
                 }
 
+                #[cfg(feature = "alloc")]
                 #[inline]
                 fn as_base32(&self) -> Box<[u8]> {
                     encode_base32(&self.to_be_bytes())
+                }
+
+                #[inline]
+                fn try_as_base32_into<'a>(&self, dst: &'a mut [u8]) -> Option<&'a [u8]> {
+                    try_encode_into_base32(&self.to_be_bytes(), dst)
                 }
 
                 #[inline]
@@ -155,9 +206,13 @@ macro_rules! impl_base32 {
 
                 #[inline]
                 fn try_from_base32(base32: &[u8]) -> Option<Self> {
-                    if let Some(bytes) = try_decode_base32(base32) {
-                        const SIZE: usize = core::mem::size_of::<$ty>();
-                        if bytes.len() != SIZE {
+                    if decoded_length_base32(base32)? != <Self as Base32>::SIZE {
+                        return None;
+                    }
+
+                    let mut dst = [0u8; <Self as Base32>::SIZE];
+                    if let Some(bytes) = try_decode_from_base32(base32, &mut dst) {
+                        if bytes.len() != <Self as Base32>::SIZE {
                             return None;
                         }
 
@@ -170,14 +225,23 @@ macro_rules! impl_base32 {
             }
 
             impl Base32Hex for $ty {
+                const SIZE: usize = core::mem::size_of::<$ty>();
+
+                #[cfg(feature = "alloc")]
                 #[inline]
                 fn as_base32hex_string(&self) -> String {
                     encode_base32hex_string(&self.to_be_bytes())
                 }
 
+                #[cfg(feature = "alloc")]
                 #[inline]
                 fn as_base32hex(&self) -> Box<[u8]> {
                     encode_base32hex(&self.to_be_bytes())
+                }
+
+                #[inline]
+                fn try_as_base32hex_into<'a>(&self, dst: &'a mut [u8]) -> Option<&'a [u8]> {
+                    try_encode_into_base32hex(&self.to_be_bytes(), dst)
                 }
 
                 #[inline]
@@ -187,9 +251,13 @@ macro_rules! impl_base32 {
 
                 #[inline]
                 fn try_from_base32hex(base32hex: &[u8]) -> Option<Self> {
-                    if let Some(bytes) = try_decode_base32hex(base32hex) {
-                        const SIZE: usize = core::mem::size_of::<$ty>();
-                        if bytes.len() != SIZE {
+                    if decoded_length_base32(base32hex)? != <Self as Base32Hex>::SIZE {
+                        return None;
+                    }
+
+                    let mut dst = [0u8; <Self as Base32Hex>::SIZE];
+                    if let Some(bytes) = try_decode_from_base32hex(base32hex, &mut dst) {
+                        if bytes.len() != <Self as Base32Hex>::SIZE {
                             return None;
                         }
 
@@ -209,8 +277,10 @@ impl_base32!(u8, u16, u32, u64, u128, i8, i16, i32, i64, i128);
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloc::fmt::Debug;
+    #[cfg(feature = "alloc")]
+    use core::fmt::Debug;
 
+    #[cfg(feature = "alloc")]
     fn assert_primitive_encoding<T>(value: T, expected: &str, expected_hex: &str)
     where
         T: Base32 + Base32Hex + Copy + Debug + Eq,
@@ -235,6 +305,7 @@ mod tests {
         assert_eq!(T::try_from_base32hex(&encoded_hex), Some(value));
     }
 
+    #[cfg(feature = "alloc")]
     #[test]
     fn integer_primitive_encodings_are_pinned() {
         macro_rules! assert_min_and_max_encoding {
@@ -281,6 +352,66 @@ mod tests {
         );
 
         assert_primitive_encoding(0xb0u8, "WA======", "M0======");
+    }
+
+    #[test]
+    fn integer_byte_sizes_are_pinned() {
+        macro_rules! assert_size {
+            ($ty:ty, $size:literal) => {
+                assert_eq!(<$ty as Base32>::SIZE, $size);
+                assert_eq!(<$ty as Base32Hex>::SIZE, $size);
+            };
+        }
+
+        assert_size!(u8, 1);
+        assert_size!(u16, 2);
+        assert_size!(u32, 4);
+        assert_size!(u64, 8);
+        assert_size!(u128, 16);
+
+        assert_size!(i8, 1);
+        assert_size!(i16, 2);
+        assert_size!(i32, 4);
+        assert_size!(i64, 8);
+        assert_size!(i128, 16);
+    }
+
+    #[test]
+    fn no_alloc_integer_encoding_is_full_width_and_preserves_the_tail() {
+        let mut base32 = [b'!'; 10];
+        assert_eq!(
+            0xb0u8.try_as_base32_into(&mut base32),
+            Some(b"WA======".as_slice()),
+        );
+        assert_eq!(&base32[8..], b"!!");
+
+        let mut base32hex = [b'?'; 10];
+        assert_eq!(
+            0xb0u8.try_as_base32hex_into(&mut base32hex),
+            Some(b"M0======".as_slice()),
+        );
+        assert_eq!(&base32hex[8..], b"??");
+
+        let mut signed = [0; 8];
+        assert_eq!(
+            i16::MIN.try_as_base32_into(&mut signed),
+            Some(b"QAAA====".as_slice()),
+        );
+        assert_eq!(
+            i16::MIN.try_as_base32hex_into(&mut signed),
+            Some(b"G000====".as_slice()),
+        );
+    }
+
+    #[test]
+    fn no_alloc_integer_encoding_returns_none_for_a_short_destination() {
+        let mut base32 = [b'!'; 7];
+        assert_eq!(0xb0u8.try_as_base32_into(&mut base32), None);
+        assert_eq!(base32, [b'!'; 7]);
+
+        let mut base32hex = [b'?'; 7];
+        assert_eq!(0xb0u8.try_as_base32hex_into(&mut base32hex), None);
+        assert_eq!(base32hex, [b'?'; 7]);
     }
 
     #[test]

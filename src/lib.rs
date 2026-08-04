@@ -29,7 +29,7 @@
 //! ## Todo
 //!
 //! - [x] No-alloc API for Base16, v2.0
-//! - [ ] No-alloc API for Base32, v2.1
+//! - [x] No-alloc API for Base32, v2.1
 //! - [ ] No-alloc API for Base64, v2.2
 //! - [ ] No-alloc API for Base85, v2.3
 //!
@@ -97,13 +97,15 @@ pub use codecs::base16::{
     try_decode_base16, try_decode_base16_string, try_decode_base16lower,
     try_decode_base16lower_string, try_decode_base16upper, try_decode_base16upper_string,
 };
-#[cfg(feature = "alloc")]
 pub use codecs::base32;
+pub use codecs::base32::{
+    Base32, Base32Hex, decoded_length_base32, encoded_length_base32, try_decode_from_base32,
+    try_decode_from_base32hex, try_encode_into_base32, try_encode_into_base32hex,
+};
 #[cfg(feature = "alloc")]
 pub use codecs::base32::{
-    Base32, Base32Hex, encode_base32, encode_base32_string, encode_base32hex,
-    encode_base32hex_string, try_decode_base32, try_decode_base32_string, try_decode_base32hex,
-    try_decode_base32hex_string,
+    encode_base32, encode_base32_string, encode_base32hex, encode_base32hex_string,
+    try_decode_base32, try_decode_base32_string, try_decode_base32hex, try_decode_base32hex_string,
 };
 #[cfg(feature = "alloc")]
 pub use codecs::base64;

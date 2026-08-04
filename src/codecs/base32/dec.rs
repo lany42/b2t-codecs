@@ -6,17 +6,24 @@
 //! eight-symbol quanta, and use canonical terminal padding with zero pad bits.
 //!
 //! ```rust
-//! use b2t_codecs::base32::{try_decode_base32_string, try_decode_base32hex_string};
+//! use b2t_codecs::base32::{try_decode_from_base32, try_decode_from_base32hex};
+//!
+//! let mut base32 = [0; 3];
+//! let mut base32hex = [0; 3];
 //!
 //! assert_eq!(
-//!     try_decode_base32_string("MZXW6===").as_deref(),
+//!     try_decode_from_base32(b"MZXW6===", &mut base32),
 //!     Some(b"foo".as_slice()),
 //! );
 //! assert_eq!(
-//!     try_decode_base32hex_string("CPNMU===").as_deref(),
+//!     try_decode_from_base32hex(b"CPNMU===", &mut base32hex),
 //!     Some(b"foo".as_slice()),
 //! );
 //! ```
+
+#[cfg(feature = "alloc")]
+use alloc::{boxed::Box, vec::Vec};
+
 use crate::base32::BASE32_PAD;
 
 const BASE32_RFC: Decoder = const {
@@ -28,47 +35,116 @@ const BASE32_HEX: Decoder = const {
     Decoder::from_table(&DECODER_HEX, MIN_ASCII_HEX, MAX_ASCII_HEX)
 };
 
-#[cfg(feature = "alloc")]
-use alloc::{boxed::Box, vec::Vec};
-
 /// Decodes a canonical padded Base32 string.
 ///
 /// Returns [`None`] unless `base32` uses the RFC 4648 Base32 alphabet, complete
 /// eight-symbol quanta, terminal padding, and zero pad bits.
+#[cfg(feature = "alloc")]
 #[must_use = "the decoding result should be handled"]
 #[inline]
 pub fn try_decode_base32_string(base32: &str) -> Option<Box<[u8]>> {
-    BASE32_RFC.try_decode_base32_string(base32)
+    BASE32_RFC.try_decode_string(base32)
 }
 
 /// Decodes canonical padded Base32 ASCII bytes.
 ///
 /// Returns [`None`] unless `base32` uses the RFC 4648 Base32 alphabet, complete
 /// eight-symbol quanta, terminal padding, and zero pad bits.
+#[cfg(feature = "alloc")]
 #[must_use = "the decoding result should be handled"]
 #[inline]
 pub fn try_decode_base32(base32: &[u8]) -> Option<Box<[u8]>> {
-    BASE32_RFC.try_decode_base32(base32)
+    BASE32_RFC.try_decode_boxed(base32)
 }
 
 /// Decodes a canonical padded Base32Hex string.
 ///
 /// Returns [`None`] unless `base32hex` uses the RFC 4648 Base32Hex alphabet,
 /// complete eight-symbol quanta, terminal padding, and zero pad bits.
+#[cfg(feature = "alloc")]
 #[must_use = "the decoding result should be handled"]
 #[inline]
 pub fn try_decode_base32hex_string(base32hex: &str) -> Option<Box<[u8]>> {
-    BASE32_HEX.try_decode_base32_string(base32hex)
+    BASE32_HEX.try_decode_string(base32hex)
 }
 
 /// Decodes canonical padded Base32Hex ASCII bytes.
 ///
 /// Returns [`None`] unless `base32hex` uses the RFC 4648 Base32Hex alphabet,
 /// complete eight-symbol quanta, terminal padding, and zero pad bits.
+#[cfg(feature = "alloc")]
 #[must_use = "the decoding result should be handled"]
 #[inline]
 pub fn try_decode_base32hex(base32hex: &[u8]) -> Option<Box<[u8]>> {
-    BASE32_HEX.try_decode_base32(base32hex)
+    BASE32_HEX.try_decode_boxed(base32hex)
+}
+
+/// Decodes canonical padded Base32 ASCII from `src` into the beginning of
+/// `dst`.
+///
+/// Returns the initialized prefix of `dst`, or [`None`] if `src` is malformed,
+/// non-canonical, or `dst` is shorter than
+/// [`decoded_length_base32(src)`](decoded_length_base32). A short destination
+/// is left unchanged. This function does not allocate.
+///
+/// If decoding returns [`None`] because of invalid input, `dst` may have been
+/// partially modified.
+#[must_use = "the decoded slice should be used"]
+#[inline]
+pub fn try_decode_from_base32<'a>(src: &[u8], dst: &'a mut [u8]) -> Option<&'a [u8]> {
+    BASE32_RFC.try_decode_into(src, dst)
+}
+
+/// Decodes canonical padded Base32Hex ASCII from `src` into the beginning of
+/// `dst`.
+///
+/// Returns the initialized prefix of `dst`, or [`None`] if `src` is malformed,
+/// non-canonical, or `dst` is shorter than
+/// [`decoded_length_base32(src)`](decoded_length_base32). A short destination
+/// is left unchanged. This function does not allocate.
+///
+/// If decoding returns [`None`] because of invalid input, `dst` may have been
+/// partially modified.
+#[must_use = "the decoded slice should be used"]
+#[inline]
+pub fn try_decode_from_base32hex<'a>(src: &[u8], dst: &'a mut [u8]) -> Option<&'a [u8]> {
+    BASE32_HEX.try_decode_into(src, dst)
+}
+
+/// Returns the exact decoded length of a padded Base32 slice.
+///
+/// Returns [`None`] unless `src` contains complete eight-symbol quanta and its
+/// trailing padding length is valid for canonical Base32. This function does
+/// not validate the alphabet, pad bits, or padding outside the final quantum.
+#[must_use = "the decoded size should be used"]
+#[inline]
+pub fn decoded_length_base32(src: &[u8]) -> Option<usize> {
+    let len = src.len();
+    if !len.is_multiple_of(8) {
+        return None;
+    }
+
+    let decoded_len = (len / 8) * 5;
+
+    let tail_shortfall = match count_tail_padding(src) {
+        0 => 0,
+        1 => 1,
+        3 => 2,
+        4 => 3,
+        6 => 4,
+        _ => return None,
+    };
+
+    Some(decoded_len - tail_shortfall)
+}
+
+#[inline]
+fn count_tail_padding(src: &[u8]) -> usize {
+    src.iter()
+        .rev()
+        .take(8)
+        .take_while(|&&byte| byte == BASE32_PAD)
+        .count()
 }
 
 struct Decoder<'d> {
@@ -93,70 +169,138 @@ impl<'d> Decoder<'d> {
         }
     }
 
+    #[cfg(feature = "alloc")]
     #[inline]
-    fn try_decode_base32_string(&self, base32: &str) -> Option<Box<[u8]>> {
-        self.try_decode_base32(base32.as_bytes())
+    fn try_decode_string(&self, base32: &str) -> Option<Box<[u8]>> {
+        self.try_decode_boxed(base32.as_bytes())
     }
 
-    fn try_decode_base32(&self, base32: &[u8]) -> Option<Box<[u8]>> {
+    #[cfg(feature = "alloc")]
+    fn try_decode_boxed(&self, base32: &[u8]) -> Option<Box<[u8]>> {
         // empty inputs result in empty outputs
         if base32.is_empty() {
             return Some(Vec::<u8>::new().into_boxed_slice());
         }
 
-        // INVARIANT: strict base32 encodes eight ASCII per five bytes
-        if !base32.len().is_multiple_of(8) {
-            return None;
-        }
-
-        let cap = base32.len().checked_mul(5)? / 8;
-        let mut ret = Vec::<u8>::with_capacity(cap);
+        let payload_len = decoded_length_base32(base32)?;
 
         let (chunks, []) = base32.as_chunks::<8>() else {
-            unreachable!("base32 slice always a multiple of eight")
+            unreachable!("decoded_length_base32 requires complete eight-symbol quanta")
         };
         let (tail, chunks) = chunks.split_last().unwrap();
+
+        let mut dst = Box::<[u8]>::new_uninit_slice(payload_len);
+        let mut written = 0usize;
 
         // whole chunks
         // padding characters are malformed here
         for &chunk in chunks {
-            ret.extend_from_slice(&self.decode_base32_full_chunk(chunk)?);
+            let chunk = self.decode_base32_full_chunk(chunk)?;
+            dst[written..written + 5].write_copy_of_slice(&chunk);
+            written += 5;
         }
 
         // handle padding at the tail
-        match tail {
-            [
-                _,
-                _,
-                BASE32_PAD,
-                BASE32_PAD,
-                BASE32_PAD,
-                BASE32_PAD,
-                BASE32_PAD,
-                BASE32_PAD,
-            ] => {
+        match count_tail_padding(tail) {
+            6 => {
                 let byte = self.decode_base32_six_pads(*tail)?;
-                ret.push(byte);
+                dst[written].write(byte);
+                written += 1;
             }
-            [_, _, _, _, BASE32_PAD, BASE32_PAD, BASE32_PAD, BASE32_PAD] => {
+            4 => {
                 let chunk = self.decode_base32_four_pads(*tail)?;
-                ret.extend_from_slice(&chunk);
+                dst[written..written + 2].write_copy_of_slice(&chunk);
+                written += 2;
             }
-            [_, _, _, _, _, BASE32_PAD, BASE32_PAD, BASE32_PAD] => {
+            3 => {
                 let chunk = self.decode_base32_three_pads(*tail)?;
-                ret.extend_from_slice(&chunk);
+                dst[written..written + 3].write_copy_of_slice(&chunk);
+                written += 3;
             }
-            [_, _, _, _, _, _, _, BASE32_PAD] => {
+            1 => {
                 let chunk = self.decode_base32_one_pad(*tail)?;
-                ret.extend_from_slice(&chunk);
+                dst[written..written + 4].write_copy_of_slice(&chunk);
+                written += 4;
             }
-            _ => {
+            0 => {
                 let chunk = self.decode_base32_full_chunk(*tail)?;
-                ret.extend_from_slice(&chunk);
+                dst[written..written + 5].write_copy_of_slice(&chunk);
+                written += 5;
             }
+            _ => unreachable!("the padding length was validated before allocation"),
         }
 
-        Some(ret.into_boxed_slice())
+        // SAFETY:
+        //  - `dst` contains `payload_len` consecutive `MaybeUninit<u8>` values.
+        //  - Successful chunk decoding writes every output byte into distinct,
+        //    in-bounds elements of `dst`.
+        //  - `written == dst.len()` verifies that every element was initialized.
+        unsafe {
+            // INVARIANT: all allocated elements were initialized.
+            assert!(written == dst.len());
+            Some(dst.assume_init())
+        }
+    }
+
+    #[inline]
+    fn try_decode_into<'a>(&self, src: &[u8], dst: &'a mut [u8]) -> Option<&'a [u8]> {
+        if src.is_empty() {
+            return Some(&dst[..0]);
+        }
+
+        let payload_len = decoded_length_base32(src)?;
+        if dst.len() < payload_len {
+            return None;
+        }
+
+        let (chunks, []) = src.as_chunks::<8>() else {
+            unreachable!("decoded_length_base32 requires complete eight-symbol quanta")
+        };
+        let (tail, chunks) = chunks.split_last().unwrap();
+
+        let mut written = 0usize;
+
+        // whole chunks
+        // padding characters are malformed here
+        for &chunk in chunks {
+            let chunk = self.decode_base32_full_chunk(chunk)?;
+            dst[written..written + 5].copy_from_slice(&chunk);
+            written += 5;
+        }
+
+        // handle padding at the tail
+        match count_tail_padding(tail) {
+            6 => {
+                let byte = self.decode_base32_six_pads(*tail)?;
+                dst[written] = byte;
+                written += 1;
+            }
+            4 => {
+                let chunk = self.decode_base32_four_pads(*tail)?;
+                dst[written..written + 2].copy_from_slice(&chunk);
+                written += 2;
+            }
+            3 => {
+                let chunk = self.decode_base32_three_pads(*tail)?;
+                dst[written..written + 3].copy_from_slice(&chunk);
+                written += 3;
+            }
+            1 => {
+                let chunk = self.decode_base32_one_pad(*tail)?;
+                dst[written..written + 4].copy_from_slice(&chunk);
+                written += 4;
+            }
+            0 => {
+                let chunk = self.decode_base32_full_chunk(*tail)?;
+                dst[written..written + 5].copy_from_slice(&chunk);
+                written += 5;
+            }
+            _ => unreachable!("the padding length was validated before decoding"),
+        }
+
+        // INVARIANT: successful decoding writes exactly `payload_len` bytes.
+        assert!(written == payload_len);
+        Some(&dst[..written])
     }
 
     fn decode_base32_full_chunk(&self, chunk: [u8; 8]) -> Option<[u8; 5]> {
@@ -321,15 +465,23 @@ impl<'d> Decoder<'d> {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "alloc")]
     use super::super::enc::{encode_base32, encode_base32hex};
+    use super::super::enc::{try_encode_into_base32, try_encode_into_base32hex};
     use super::super::{ENCODER, ENCODER_HEX};
     use super::*;
 
+    #[cfg(feature = "alloc")]
     use alloc::vec;
 
+    #[cfg(feature = "alloc")]
     type Encode = fn(&[u8]) -> Box<[u8]>;
+    #[cfg(feature = "alloc")]
     type Decode = fn(&[u8]) -> Option<Box<[u8]>>;
+    type EncodeInto = for<'a> fn(&[u8], &'a mut [u8]) -> Option<&'a [u8]>;
+    type DecodeInto = for<'a> fn(&[u8], &'a mut [u8]) -> Option<&'a [u8]>;
 
+    #[cfg(feature = "alloc")]
     fn codecs() -> [(&'static str, Encode, Decode, &'static [u8]); 2] {
         [
             ("Base32", encode_base32, try_decode_base32, &ENCODER),
@@ -340,6 +492,37 @@ mod tests {
                 &ENCODER_HEX,
             ),
         ]
+    }
+
+    #[test]
+    fn decoded_lengths_are_exact_and_require_complete_quanta() {
+        assert_eq!(decoded_length_base32(b""), Some(0));
+        assert_eq!(decoded_length_base32(b"A"), None);
+        assert_eq!(decoded_length_base32(b"AAAAAAA"), None);
+        assert_eq!(decoded_length_base32(b"AAAAAAAA"), Some(5));
+        assert_eq!(decoded_length_base32(b"MY======"), Some(1));
+        assert_eq!(decoded_length_base32(b"MZXQ===="), Some(2));
+        assert_eq!(decoded_length_base32(b"MZXW6==="), Some(3));
+        assert_eq!(decoded_length_base32(b"MZXW6YQ="), Some(4));
+        assert_eq!(decoded_length_base32(b"MZXW6YTB"), Some(5));
+        assert_eq!(decoded_length_base32(b"MZXW6YTBOI======"), Some(6));
+        assert_eq!(decoded_length_base32(b"AAAAAAAAAAAAAAAA"), Some(10));
+        assert_eq!(decoded_length_base32(b"AAAAAA=="), None);
+        assert_eq!(decoded_length_base32(b"AAA====="), None);
+        assert_eq!(decoded_length_base32(b"A======="), None);
+        assert_eq!(decoded_length_base32(b"========"), None);
+    }
+
+    #[test]
+    fn tail_padding_is_counted_backwards_from_the_end() {
+        assert_eq!(count_tail_padding(b"AAAAAAAA"), 0);
+        assert_eq!(count_tail_padding(b"AAAAAAA="), 1);
+        assert_eq!(count_tail_padding(b"AAAAA==="), 3);
+        assert_eq!(count_tail_padding(b"AAAA===="), 4);
+        assert_eq!(count_tail_padding(b"AA======"), 6);
+        assert_eq!(count_tail_padding(b"A===A==="), 3);
+        assert_eq!(count_tail_padding(b"========"), 8);
+        assert_eq!(count_tail_padding(b"================"), 8);
     }
 
     #[test]
@@ -355,44 +538,114 @@ mod tests {
         ];
 
         for &(plain, base32, base32hex) in vectors {
-            assert_eq!(try_decode_base32(base32.as_bytes()).as_deref(), Some(plain));
-            assert_eq!(try_decode_base32_string(base32).as_deref(), Some(plain));
+            #[cfg(feature = "alloc")]
+            {
+                assert_eq!(try_decode_base32(base32.as_bytes()).as_deref(), Some(plain));
+                assert_eq!(try_decode_base32_string(base32).as_deref(), Some(plain));
+                assert_eq!(
+                    try_decode_base32hex(base32hex.as_bytes()).as_deref(),
+                    Some(plain)
+                );
+                assert_eq!(
+                    try_decode_base32hex_string(base32hex).as_deref(),
+                    Some(plain)
+                );
+            }
+
+            let mut dst = [0u8; 6];
             assert_eq!(
-                try_decode_base32hex(base32hex.as_bytes()).as_deref(),
+                try_decode_from_base32(base32.as_bytes(), &mut dst),
                 Some(plain)
             );
+
+            let mut dst = [0u8; 6];
             assert_eq!(
-                try_decode_base32hex_string(base32hex).as_deref(),
+                try_decode_from_base32hex(base32hex.as_bytes(), &mut dst),
                 Some(plain)
             );
         }
     }
 
     #[test]
+    fn non_allocating_decoders_preserve_destination_bounds() {
+        let codecs: [(&str, DecodeInto, &[u8]); 2] = [
+            ("Base32", try_decode_from_base32, b"MZXW6YTBOI======"),
+            ("Base32Hex", try_decode_from_base32hex, b"CPNMUOJ1E8======"),
+        ];
+
+        for (name, decode, encoded) in codecs {
+            let mut short = [0xa5; 5];
+            assert_eq!(decode(encoded, &mut short), None, "{name}");
+            assert_eq!(short, [0xa5; 5], "{name} modified a short destination");
+
+            let mut oversized = [0xa5; 8];
+            assert_eq!(
+                decode(encoded, &mut oversized),
+                Some(b"foobar".as_slice()),
+                "{name}"
+            );
+            assert_eq!(
+                &oversized[6..],
+                &[0xa5; 2],
+                "{name} modified the destination suffix"
+            );
+
+            assert_eq!(decode(b"", &mut oversized), Some([].as_slice()), "{name}");
+        }
+    }
+
+    #[test]
+    fn non_allocating_decoders_reject_noncanonical_inputs() {
+        let codecs: [(&str, DecodeInto, &[u8]); 2] = [
+            ("Base32", try_decode_from_base32, b"MZ======"),
+            ("Base32Hex", try_decode_from_base32hex, b"CP======"),
+        ];
+
+        for (name, decode, non_zero_pad_bits) in codecs {
+            let mut dst = [0u8; 10];
+            for input in [
+                b"A".as_slice(),
+                b"!!!!!!!!".as_slice(),
+                b"AAAAAA==".as_slice(),
+                b"AA======AAAAAAAA".as_slice(),
+                non_zero_pad_bits,
+            ] {
+                assert_eq!(decode(input, &mut dst), None, "{name} accepted {input:?}");
+            }
+        }
+    }
+
+    #[test]
     fn three_pad_tail_decoding_preserves_all_three_bytes() {
+        let mut dst = [0; 3];
         assert_eq!(
-            try_decode_base32(b"MZXW6===").as_deref(),
+            try_decode_from_base32(b"MZXW6===", &mut dst),
             Some(b"foo".as_slice())
         );
+
+        let mut dst = [0; 3];
         assert_eq!(
-            try_decode_base32hex(b"CPNMU===").as_deref(),
+            try_decode_from_base32hex(b"CPNMU===", &mut dst),
             Some(b"foo".as_slice())
         );
     }
 
     #[test]
     fn decoders_select_the_requested_alphabet() {
+        let mut dst = [0; 1];
         assert_eq!(
-            try_decode_base32(b"WA======").as_deref(),
-            Some([0xb0].as_slice())
-        );
-        assert_eq!(
-            try_decode_base32hex(b"M0======").as_deref(),
+            try_decode_from_base32(b"WA======", &mut dst),
             Some([0xb0].as_slice())
         );
 
-        assert_eq!(try_decode_base32(b"M0======"), None);
-        assert_eq!(try_decode_base32hex(b"WA======"), None);
+        let mut dst = [0; 1];
+        assert_eq!(
+            try_decode_from_base32hex(b"M0======", &mut dst),
+            Some([0xb0].as_slice())
+        );
+
+        assert_eq!(try_decode_from_base32(b"M0======", &mut dst), None);
+        assert_eq!(try_decode_from_base32hex(b"WA======", &mut dst), None);
     }
 
     #[test]
@@ -401,7 +654,7 @@ mod tests {
             assert!(decoder.max_ascii > decoder.min_ascii);
             assert_eq!(decoder.max_ascii - decoder.min_ascii, decoder.decoder.len());
 
-            let mut seen = vec![false; decoder.decoder.len()];
+            let mut seen = [false; 41];
             for (digit, &ascii) in encoder.iter().enumerate() {
                 let ascii = ascii as usize;
                 assert!((decoder.min_ascii..decoder.max_ascii).contains(&ascii));
@@ -427,6 +680,38 @@ mod tests {
     }
 
     #[test]
+    fn arbitrary_byte_slices_roundtrip_through_non_allocating_codecs() {
+        let codecs: [(&str, EncodeInto, DecodeInto); 2] = [
+            ("Base32", try_encode_into_base32, try_decode_from_base32),
+            (
+                "Base32Hex",
+                try_encode_into_base32hex,
+                try_decode_from_base32hex,
+            ),
+        ];
+
+        let mut input = [0u8; 64];
+        let mut encoded = [0u8; 104];
+        let mut decoded = [0u8; 64];
+
+        for len in 0usize..=input.len() {
+            for (i, byte) in input[..len].iter_mut().enumerate() {
+                *byte = (i.wrapping_mul(73).wrapping_add(len * 19)) as u8;
+            }
+
+            for (name, encode, decode) in codecs {
+                let encoded = encode(&input[..len], &mut encoded).unwrap();
+                assert_eq!(
+                    decode(encoded, &mut decoded),
+                    Some(&input[..len]),
+                    "{name} failed to roundtrip {len} data bytes"
+                );
+            }
+        }
+    }
+
+    #[cfg(feature = "alloc")]
+    #[test]
     fn byte_slices_of_arbitrary_lengths_roundtrip_through_matching_decoders() {
         for len in 0usize..=64 {
             let input: Vec<u8> = (0..len)
@@ -444,6 +729,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "alloc")]
     #[test]
     fn strict_decode_requires_complete_quanta() {
         for (name, _, decode, alphabet) in codecs() {
@@ -458,6 +744,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "alloc")]
     #[test]
     fn decoders_reject_every_non_zero_pad_bit_alias() {
         // (input bytes, last data-symbol position, unused low-bit mask)
@@ -501,6 +788,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "alloc")]
     #[test]
     fn strict_decode_rejects_non_terminal_or_malformed_padding() {
         for (name, encode, decode, _) in codecs() {
@@ -533,6 +821,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "alloc")]
     #[test]
     fn decoders_reject_every_non_alphabet_byte_in_any_frame() {
         fn assert_invalid_bytes_rejected(name: &str, decode: Decode, alphabet: &[u8]) {
