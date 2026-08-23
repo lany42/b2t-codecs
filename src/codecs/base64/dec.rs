@@ -205,6 +205,11 @@ pub fn try_decode_from_base64urlext<'a>(src: &[u8], dst: &'a mut [u8]) -> Option
 #[must_use = "the decoded size should be used"]
 #[inline]
 pub fn decoded_length_base64(src: &[u8]) -> Option<usize> {
+    decoded_length(src)
+}
+
+#[inline]
+fn decoded_length(src: &[u8]) -> Option<usize> {
     let len = src.len();
     if !len.is_multiple_of(4) {
         return None;
@@ -232,6 +237,11 @@ pub fn decoded_length_base64(src: &[u8]) -> Option<usize> {
 #[must_use = "the decoded size should be used"]
 #[inline]
 pub fn decoded_length_base64ext(src: &[u8]) -> Option<usize> {
+    decoded_length_extended(src)
+}
+
+#[inline]
+fn decoded_length_extended(src: &[u8]) -> Option<usize> {
     let tail_len = match src.len() % 4 {
         0 => 0,
         1 => return None,
@@ -292,7 +302,7 @@ impl<'d> Decoder<'d> {
             return Some(Vec::<u8>::new().into_boxed_slice());
         }
 
-        let payload_len = decoded_length_base64(base64)?;
+        let payload_len = decoded_length(base64)?;
         let (chunks, []) = base64.as_chunks::<4>() else {
             unreachable!("decoded_length_base64 requires complete four-symbol quanta")
         };
@@ -345,7 +355,7 @@ impl<'d> Decoder<'d> {
             return Some(Vec::<u8>::new().into_boxed_slice());
         }
 
-        let payload_capacity = decoded_length_base64ext(base64)?;
+        let payload_capacity = decoded_length_extended(base64)?;
         let mut dst = Vec::<u8>::with_capacity(payload_capacity);
         let (chunks, rem) = base64.as_chunks::<4>();
 
@@ -370,7 +380,7 @@ impl<'d> Decoder<'d> {
             return Some(&dst[..0]);
         }
 
-        let payload_len = decoded_length_base64(src)?;
+        let payload_len = decoded_length(src)?;
         if dst.len() < payload_len {
             return None;
         }
@@ -416,7 +426,7 @@ impl<'d> Decoder<'d> {
             return Some(&dst[..0]);
         }
 
-        let payload_capacity = decoded_length_base64ext(src)?;
+        let payload_capacity = decoded_length_extended(src)?;
         if dst.len() < payload_capacity {
             return None;
         }
@@ -546,16 +556,19 @@ impl<'d> Decoder<'d> {
 
 #[cfg(test)]
 mod tests {
-    #[cfg(feature = "alloc")]
-    use super::super::enc::{encode_base64, encode_base64url};
-    use super::super::enc::{try_encode_into_base64, try_encode_into_base64url};
+    use super::super::enc;
     use super::super::{ENCODER, ENCODER_URL};
-    use super::*;
+    use super::{BASE64_RFC, BASE64_URL, Decoder, decoded_length, decoded_length_extended};
 
     #[cfg(feature = "alloc")]
-    type Decode = fn(&[u8]) -> Option<Box<[u8]>>;
-    type EncodeInto = for<'a> fn(&[u8], &'a mut [u8]) -> Option<&'a [u8]>;
-    type DecodeInto = for<'a> fn(&[u8], &'a mut [u8]) -> Option<&'a [u8]>;
+    use super::BASE64_PAD;
+
+    #[cfg(feature = "alloc")]
+    use alloc::{boxed::Box, vec::Vec};
+
+    #[cfg(feature = "alloc")]
+    type Decode = fn(&Decoder<'static>, &[u8]) -> Option<Box<[u8]>>;
+    type DecodeInto = for<'a> fn(&Decoder<'static>, &[u8], &'a mut [u8]) -> Option<&'a [u8]>;
 
     const RFC_4648_VECTORS: &[(&[u8], &str)] = &[
         (b"", ""),
@@ -574,83 +587,115 @@ mod tests {
     ];
 
     #[cfg(feature = "alloc")]
-    fn strict_decoders() -> [(&'static str, Decode); 2] {
+    fn strict_decoders() -> [(&'static str, &'static Decoder<'static>); 2] {
         [
-            ("Base64 strict", try_decode_base64),
-            ("Base64URL strict", try_decode_base64url),
+            ("Base64 strict", &BASE64_RFC),
+            ("Base64URL strict", &BASE64_URL),
         ]
     }
 
     #[cfg(feature = "alloc")]
-    fn extended_decoders() -> [(&'static str, Decode); 2] {
+    fn extended_decoders() -> [(&'static str, &'static Decoder<'static>); 2] {
         [
-            ("Base64 extended", try_decode_base64ext),
-            ("Base64URL extended", try_decode_base64urlext),
+            ("Base64 extended", &BASE64_RFC),
+            ("Base64URL extended", &BASE64_URL),
         ]
     }
 
     #[cfg(feature = "alloc")]
-    fn all_decoders() -> [(&'static str, Decode); 4] {
+    fn all_decoders() -> [(&'static str, &'static Decoder<'static>, Decode); 4] {
         [
-            ("Base64 strict", try_decode_base64),
-            ("Base64 extended", try_decode_base64ext),
-            ("Base64URL strict", try_decode_base64url),
-            ("Base64URL extended", try_decode_base64urlext),
+            (
+                "Base64 strict",
+                &BASE64_RFC,
+                Decoder::try_decode_strict_boxed,
+            ),
+            (
+                "Base64 extended",
+                &BASE64_RFC,
+                Decoder::try_decode_extended_boxed,
+            ),
+            (
+                "Base64URL strict",
+                &BASE64_URL,
+                Decoder::try_decode_strict_boxed,
+            ),
+            (
+                "Base64URL extended",
+                &BASE64_URL,
+                Decoder::try_decode_extended_boxed,
+            ),
         ]
     }
 
-    fn strict_decoders_into() -> [(&'static str, DecodeInto); 2] {
+    fn strict_decoders_into() -> [(&'static str, &'static Decoder<'static>); 2] {
         [
-            ("Base64 strict", try_decode_from_base64),
-            ("Base64URL strict", try_decode_from_base64url),
+            ("Base64 strict", &BASE64_RFC),
+            ("Base64URL strict", &BASE64_URL),
         ]
     }
 
-    fn extended_decoders_into() -> [(&'static str, DecodeInto); 2] {
+    fn extended_decoders_into() -> [(&'static str, &'static Decoder<'static>); 2] {
         [
-            ("Base64 extended", try_decode_from_base64ext),
-            ("Base64URL extended", try_decode_from_base64urlext),
+            ("Base64 extended", &BASE64_RFC),
+            ("Base64URL extended", &BASE64_URL),
         ]
     }
 
-    fn all_decoders_into() -> [(&'static str, DecodeInto); 4] {
+    fn all_decoders_into() -> [(&'static str, &'static Decoder<'static>, DecodeInto); 4] {
         [
-            ("Base64 strict", try_decode_from_base64),
-            ("Base64 extended", try_decode_from_base64ext),
-            ("Base64URL strict", try_decode_from_base64url),
-            ("Base64URL extended", try_decode_from_base64urlext),
+            (
+                "Base64 strict",
+                &BASE64_RFC,
+                Decoder::try_decode_strict_into,
+            ),
+            (
+                "Base64 extended",
+                &BASE64_RFC,
+                Decoder::try_decode_extended_into,
+            ),
+            (
+                "Base64URL strict",
+                &BASE64_URL,
+                Decoder::try_decode_strict_into,
+            ),
+            (
+                "Base64URL extended",
+                &BASE64_URL,
+                Decoder::try_decode_extended_into,
+            ),
         ]
     }
 
     #[test]
     fn decoded_lengths_are_exact_for_strict_framing() {
-        assert_eq!(decoded_length_base64(b""), Some(0));
-        assert_eq!(decoded_length_base64(b"A"), None);
-        assert_eq!(decoded_length_base64(b"AAA"), None);
-        assert_eq!(decoded_length_base64(b"AAAA"), Some(3));
-        assert_eq!(decoded_length_base64(b"Zg=="), Some(1));
-        assert_eq!(decoded_length_base64(b"Zm8="), Some(2));
-        assert_eq!(decoded_length_base64(b"Zm9v"), Some(3));
-        assert_eq!(decoded_length_base64(b"Zm9vYg=="), Some(4));
-        assert_eq!(decoded_length_base64(b"A==="), None);
-        assert_eq!(decoded_length_base64(b"===="), None);
+        assert_eq!(decoded_length(b""), Some(0));
+        assert_eq!(decoded_length(b"A"), None);
+        assert_eq!(decoded_length(b"AAA"), None);
+        assert_eq!(decoded_length(b"AAAA"), Some(3));
+        assert_eq!(decoded_length(b"Zg=="), Some(1));
+        assert_eq!(decoded_length(b"Zm8="), Some(2));
+        assert_eq!(decoded_length(b"Zm9v"), Some(3));
+        assert_eq!(decoded_length(b"Zm9vYg=="), Some(4));
+        assert_eq!(decoded_length(b"A==="), None);
+        assert_eq!(decoded_length(b"===="), None);
     }
 
     #[test]
     fn decoded_lengths_are_upper_bounds_for_extended_framing() {
-        assert_eq!(decoded_length_base64ext(b""), Some(0));
-        assert_eq!(decoded_length_base64ext(b"A"), None);
-        assert_eq!(decoded_length_base64ext(b"AA"), Some(1));
-        assert_eq!(decoded_length_base64ext(b"AAA"), Some(2));
-        assert_eq!(decoded_length_base64ext(b"AAAA"), Some(3));
-        assert_eq!(decoded_length_base64ext(b"Zg=="), Some(3));
-        assert_eq!(decoded_length_base64ext(b"Zm8="), Some(3));
-        assert_eq!(decoded_length_base64ext(b"===="), Some(3));
-        assert_eq!(decoded_length_base64ext(b"TQ==TWE="), Some(6));
-        assert_eq!(decoded_length_base64ext(b"TQ======TQ=="), Some(9));
-        assert_eq!(decoded_length_base64ext(b"AAAAAA"), Some(4));
-        assert_eq!(decoded_length_base64ext(b"AAAAAAA"), Some(5));
-        assert_eq!(decoded_length_base64ext(b"AAAAA"), None);
+        assert_eq!(decoded_length_extended(b""), Some(0));
+        assert_eq!(decoded_length_extended(b"A"), None);
+        assert_eq!(decoded_length_extended(b"AA"), Some(1));
+        assert_eq!(decoded_length_extended(b"AAA"), Some(2));
+        assert_eq!(decoded_length_extended(b"AAAA"), Some(3));
+        assert_eq!(decoded_length_extended(b"Zg=="), Some(3));
+        assert_eq!(decoded_length_extended(b"Zm8="), Some(3));
+        assert_eq!(decoded_length_extended(b"===="), Some(3));
+        assert_eq!(decoded_length_extended(b"TQ==TWE="), Some(6));
+        assert_eq!(decoded_length_extended(b"TQ======TQ=="), Some(9));
+        assert_eq!(decoded_length_extended(b"AAAAAA"), Some(4));
+        assert_eq!(decoded_length_extended(b"AAAAAAA"), Some(5));
+        assert_eq!(decoded_length_extended(b"AAAAA"), None);
     }
 
     #[test]
@@ -658,25 +703,25 @@ mod tests {
         for &(plain, encoded) in RFC_4648_VECTORS {
             let mut dst = [0u8; 6];
             assert_eq!(
-                try_decode_from_base64(encoded.as_bytes(), &mut dst),
+                BASE64_RFC.try_decode_strict_into(encoded.as_bytes(), &mut dst),
                 Some(plain),
             );
 
             let mut dst = [0u8; 6];
             assert_eq!(
-                try_decode_from_base64ext(encoded.as_bytes(), &mut dst),
+                BASE64_RFC.try_decode_extended_into(encoded.as_bytes(), &mut dst),
                 Some(plain),
             );
 
             let mut dst = [0u8; 6];
             assert_eq!(
-                try_decode_from_base64url(encoded.as_bytes(), &mut dst),
+                BASE64_URL.try_decode_strict_into(encoded.as_bytes(), &mut dst),
                 Some(plain),
             );
 
             let mut dst = [0u8; 6];
             assert_eq!(
-                try_decode_from_base64urlext(encoded.as_bytes(), &mut dst),
+                BASE64_URL.try_decode_extended_into(encoded.as_bytes(), &mut dst),
                 Some(plain),
             );
         }
@@ -687,35 +732,41 @@ mod tests {
         for &(plain, base64, base64url) in ALPHABET_VECTORS {
             let mut dst = [0u8; 3];
             assert_eq!(
-                try_decode_from_base64(base64.as_bytes(), &mut dst),
-                Some(plain),
-            );
-            assert_eq!(try_decode_from_base64(base64url.as_bytes(), &mut dst), None,);
-
-            let mut dst = [0u8; 3];
-            assert_eq!(
-                try_decode_from_base64url(base64url.as_bytes(), &mut dst),
-                Some(plain),
-            );
-            assert_eq!(try_decode_from_base64url(base64.as_bytes(), &mut dst), None,);
-
-            let mut dst = [0u8; 3];
-            assert_eq!(
-                try_decode_from_base64ext(base64.as_bytes(), &mut dst),
+                BASE64_RFC.try_decode_strict_into(base64.as_bytes(), &mut dst),
                 Some(plain),
             );
             assert_eq!(
-                try_decode_from_base64ext(base64url.as_bytes(), &mut dst),
+                BASE64_RFC.try_decode_strict_into(base64url.as_bytes(), &mut dst),
                 None,
             );
 
             let mut dst = [0u8; 3];
             assert_eq!(
-                try_decode_from_base64urlext(base64url.as_bytes(), &mut dst),
+                BASE64_URL.try_decode_strict_into(base64url.as_bytes(), &mut dst),
                 Some(plain),
             );
             assert_eq!(
-                try_decode_from_base64urlext(base64.as_bytes(), &mut dst),
+                BASE64_URL.try_decode_strict_into(base64.as_bytes(), &mut dst),
+                None,
+            );
+
+            let mut dst = [0u8; 3];
+            assert_eq!(
+                BASE64_RFC.try_decode_extended_into(base64.as_bytes(), &mut dst),
+                Some(plain),
+            );
+            assert_eq!(
+                BASE64_RFC.try_decode_extended_into(base64url.as_bytes(), &mut dst),
+                None,
+            );
+
+            let mut dst = [0u8; 3];
+            assert_eq!(
+                BASE64_URL.try_decode_extended_into(base64url.as_bytes(), &mut dst),
+                Some(plain),
+            );
+            assert_eq!(
+                BASE64_URL.try_decode_extended_into(base64.as_bytes(), &mut dst),
                 None,
             );
         }
@@ -723,14 +774,14 @@ mod tests {
 
     #[test]
     fn non_allocating_decoders_preserve_destination_bounds() {
-        for (name, decode) in all_decoders_into() {
+        for (name, decoder, decode) in all_decoders_into() {
             let mut short = [0xa5; 5];
-            assert_eq!(decode(b"Zm9vYmFy", &mut short), None, "{name}");
+            assert_eq!(decode(decoder, b"Zm9vYmFy", &mut short), None, "{name}");
             assert_eq!(short, [0xa5; 5], "{name} modified a short destination");
 
             let mut oversized = [0xa5; 8];
             assert_eq!(
-                decode(b"Zm9vYmFy", &mut oversized),
+                decode(decoder, b"Zm9vYmFy", &mut oversized),
                 Some(b"foobar".as_slice()),
                 "{name}",
             );
@@ -740,22 +791,38 @@ mod tests {
                 "{name} modified the destination suffix",
             );
 
-            assert_eq!(decode(b"", &mut oversized), Some([].as_slice()), "{name}");
+            assert_eq!(
+                decode(decoder, b"", &mut oversized),
+                Some([].as_slice()),
+                "{name}"
+            );
         }
 
-        for (name, decode) in extended_decoders_into() {
+        for (name, decoder) in extended_decoders_into() {
             let mut padded_exact = [0xa5; 1];
-            assert_eq!(decode(b"TQ==", &mut padded_exact), None, "{name}");
+            assert_eq!(
+                decoder.try_decode_extended_into(b"TQ==", &mut padded_exact),
+                None,
+                "{name}"
+            );
             assert_eq!(
                 padded_exact, [0xa5; 1],
                 "{name} modified a destination shorter than the upper bound",
             );
 
             let mut padding_only_exact = [0u8; 0];
-            assert_eq!(decode(b"====", &mut padding_only_exact), None, "{name}");
+            assert_eq!(
+                decoder.try_decode_extended_into(b"====", &mut padding_only_exact),
+                None,
+                "{name}"
+            );
 
             let mut exact = [0xa5; 2];
-            assert_eq!(decode(b"TQ==TQ==", &mut exact), None, "{name}");
+            assert_eq!(
+                decoder.try_decode_extended_into(b"TQ==TQ==", &mut exact),
+                None,
+                "{name}"
+            );
             assert_eq!(
                 exact, [0xa5; 2],
                 "{name} modified a destination shorter than the upper bound",
@@ -763,7 +830,7 @@ mod tests {
 
             let mut upper_bound = [0xa5; 6];
             assert_eq!(
-                decode(b"TQ==TQ==", &mut upper_bound),
+                decoder.try_decode_extended_into(b"TQ==TQ==", &mut upper_bound),
                 Some(b"MM".as_slice()),
                 "{name}",
             );
@@ -773,27 +840,63 @@ mod tests {
 
     #[test]
     fn non_allocating_decoders_reject_noncanonical_inputs() {
-        for (name, decode) in all_decoders_into() {
+        for (name, decoder, decode) in all_decoders_into() {
             let mut dst = [0u8; 3];
-            assert_eq!(decode(b"TQ==", &mut dst), Some(b"M".as_slice()), "{name}");
-            assert_eq!(decode(b"TR==", &mut dst), None, "{name} accepted pad bits");
-            assert_eq!(decode(b"TWE=", &mut dst), Some(b"Ma".as_slice()), "{name}");
-            assert_eq!(decode(b"TWF=", &mut dst), None, "{name} accepted pad bits");
+            assert_eq!(
+                decode(decoder, b"TQ==", &mut dst),
+                Some(b"M".as_slice()),
+                "{name}"
+            );
+            assert_eq!(
+                decode(decoder, b"TR==", &mut dst),
+                None,
+                "{name} accepted pad bits"
+            );
+            assert_eq!(
+                decode(decoder, b"TWE=", &mut dst),
+                Some(b"Ma".as_slice()),
+                "{name}"
+            );
+            assert_eq!(
+                decode(decoder, b"TWF=", &mut dst),
+                None,
+                "{name} accepted pad bits"
+            );
         }
 
-        for (name, decode) in strict_decoders_into() {
+        for (name, decoder) in strict_decoders_into() {
             let mut dst = [0u8; 3];
             for input in [b"A".as_slice(), b"Zg".as_slice(), b"Zm8".as_slice()] {
-                assert_eq!(decode(input, &mut dst), None, "{name} accepted {input:?}");
+                assert_eq!(
+                    decoder.try_decode_strict_into(input, &mut dst),
+                    None,
+                    "{name} accepted {input:?}"
+                );
             }
         }
 
-        for (name, decode) in extended_decoders_into() {
+        for (name, decoder) in extended_decoders_into() {
             let mut dst = [0u8; 3];
-            assert_eq!(decode(b"TQ", &mut dst), Some(b"M".as_slice()), "{name}");
-            assert_eq!(decode(b"TR", &mut dst), None, "{name} accepted pad bits");
-            assert_eq!(decode(b"TWE", &mut dst), Some(b"Ma".as_slice()), "{name}");
-            assert_eq!(decode(b"TWF", &mut dst), None, "{name} accepted pad bits");
+            assert_eq!(
+                decoder.try_decode_extended_into(b"TQ", &mut dst),
+                Some(b"M".as_slice()),
+                "{name}"
+            );
+            assert_eq!(
+                decoder.try_decode_extended_into(b"TR", &mut dst),
+                None,
+                "{name} accepted pad bits"
+            );
+            assert_eq!(
+                decoder.try_decode_extended_into(b"TWE", &mut dst),
+                Some(b"Ma".as_slice()),
+                "{name}"
+            );
+            assert_eq!(
+                decoder.try_decode_extended_into(b"TWF", &mut dst),
+                None,
+                "{name} accepted pad bits"
+            );
         }
     }
 
@@ -808,10 +911,14 @@ mod tests {
             (b"TQ======TQ==", b"MM"),
         ];
 
-        for (name, decode) in extended_decoders_into() {
+        for (name, decoder) in extended_decoders_into() {
             for &(input, expected) in cases {
                 let mut dst = [0xa5; 9];
-                assert_eq!(decode(input, &mut dst), Some(expected), "{name}: {input:?}");
+                assert_eq!(
+                    decoder.try_decode_extended_into(input, &mut dst),
+                    Some(expected),
+                    "{name}: {input:?}"
+                );
                 assert_eq!(
                     &dst[expected.len()..],
                     &[0xa5; 9][expected.len()..],
@@ -830,26 +937,20 @@ mod tests {
                 b"===A".as_slice(),
                 b"AA=".as_slice(),
             ] {
-                assert_eq!(decode(input, &mut dst), None, "{name} accepted {input:?}");
+                assert_eq!(
+                    decoder.try_decode_extended_into(input, &mut dst),
+                    None,
+                    "{name} accepted {input:?}"
+                );
             }
         }
     }
 
     #[test]
     fn arbitrary_byte_slices_roundtrip_through_non_allocating_codecs() {
-        let codecs: [(&str, EncodeInto, DecodeInto, DecodeInto); 2] = [
-            (
-                "Base64",
-                try_encode_into_base64,
-                try_decode_from_base64,
-                try_decode_from_base64ext,
-            ),
-            (
-                "Base64URL",
-                try_encode_into_base64url,
-                try_decode_from_base64url,
-                try_decode_from_base64urlext,
-            ),
+        let codecs = [
+            ("Base64", &enc::BASE64_RFC, &BASE64_RFC),
+            ("Base64URL", &enc::BASE64_URL, &BASE64_URL),
         ];
 
         let mut input = [0u8; 64];
@@ -861,15 +962,15 @@ mod tests {
                 *byte = (i.wrapping_mul(73).wrapping_add(len * 19)) as u8;
             }
 
-            for (name, encode, strict, extended) in codecs {
-                let encoded = encode(&input[..len], &mut encoded).unwrap();
+            for (name, encoder, decoder) in codecs {
+                let encoded = encoder.encode_into(&input[..len], &mut encoded).unwrap();
                 assert_eq!(
-                    strict(encoded, &mut decoded),
+                    decoder.try_decode_strict_into(encoded, &mut decoded),
                     Some(&input[..len]),
                     "{name} strict failed to roundtrip {len} data bytes",
                 );
                 assert_eq!(
-                    extended(encoded, &mut decoded),
+                    decoder.try_decode_extended_into(encoded, &mut decoded),
                     Some(&input[..len]),
                     "{name} extended failed to roundtrip {len} data bytes",
                 );
@@ -882,29 +983,46 @@ mod tests {
     fn rfc_4648_base64_test_vectors_pin_decoding() {
         for &(plain, encoded) in RFC_4648_VECTORS {
             assert_eq!(
-                try_decode_base64(encoded.as_bytes()).as_deref(),
+                BASE64_RFC
+                    .try_decode_strict_boxed(encoded.as_bytes())
+                    .as_deref(),
                 Some(plain)
             );
-            assert_eq!(try_decode_base64_string(encoded).as_deref(), Some(plain));
             assert_eq!(
-                try_decode_base64ext(encoded.as_bytes()).as_deref(),
+                BASE64_RFC.try_decode_strict_string(encoded).as_deref(),
                 Some(plain)
             );
-            assert_eq!(try_decode_base64ext_string(encoded).as_deref(), Some(plain));
+            assert_eq!(
+                BASE64_RFC
+                    .try_decode_extended_boxed(encoded.as_bytes())
+                    .as_deref(),
+                Some(plain)
+            );
+            assert_eq!(
+                BASE64_RFC.try_decode_extended_string(encoded).as_deref(),
+                Some(plain)
+            );
 
             // These RFC vectors do not use alphabet digits 62 or 63, so they
             // are valid under the Base64URL alphabet as well.
             assert_eq!(
-                try_decode_base64url(encoded.as_bytes()).as_deref(),
-                Some(plain)
-            );
-            assert_eq!(try_decode_base64url_string(encoded).as_deref(), Some(plain));
-            assert_eq!(
-                try_decode_base64urlext(encoded.as_bytes()).as_deref(),
+                BASE64_URL
+                    .try_decode_strict_boxed(encoded.as_bytes())
+                    .as_deref(),
                 Some(plain)
             );
             assert_eq!(
-                try_decode_base64urlext_string(encoded).as_deref(),
+                BASE64_URL.try_decode_strict_string(encoded).as_deref(),
+                Some(plain)
+            );
+            assert_eq!(
+                BASE64_URL
+                    .try_decode_extended_boxed(encoded.as_bytes())
+                    .as_deref(),
+                Some(plain)
+            );
+            assert_eq!(
+                BASE64_URL.try_decode_extended_string(encoded).as_deref(),
                 Some(plain)
             );
         }
@@ -914,21 +1032,36 @@ mod tests {
     #[test]
     fn base64url_decoding_uses_url_safe_alphabet() {
         for &(plain, base64, base64url) in ALPHABET_VECTORS {
-            assert_eq!(try_decode_base64_string(base64).as_deref(), Some(plain));
-            assert_eq!(try_decode_base64ext_string(base64).as_deref(), Some(plain));
             assert_eq!(
-                try_decode_base64url_string(base64url).as_deref(),
+                BASE64_RFC.try_decode_strict_string(base64).as_deref(),
                 Some(plain)
             );
             assert_eq!(
-                try_decode_base64urlext_string(base64url).as_deref(),
+                BASE64_RFC.try_decode_extended_string(base64).as_deref(),
+                Some(plain)
+            );
+            assert_eq!(
+                BASE64_URL.try_decode_strict_string(base64url).as_deref(),
+                Some(plain)
+            );
+            assert_eq!(
+                BASE64_URL.try_decode_extended_string(base64url).as_deref(),
                 Some(plain)
             );
 
-            assert_eq!(try_decode_base64(base64url.as_bytes()), None);
-            assert_eq!(try_decode_base64ext(base64url.as_bytes()), None);
-            assert_eq!(try_decode_base64url(base64.as_bytes()), None);
-            assert_eq!(try_decode_base64urlext(base64.as_bytes()), None);
+            assert_eq!(
+                BASE64_RFC.try_decode_strict_boxed(base64url.as_bytes()),
+                None
+            );
+            assert_eq!(
+                BASE64_RFC.try_decode_extended_boxed(base64url.as_bytes()),
+                None
+            );
+            assert_eq!(BASE64_URL.try_decode_strict_boxed(base64.as_bytes()), None);
+            assert_eq!(
+                BASE64_URL.try_decode_extended_boxed(base64.as_bytes()),
+                None
+            );
         }
     }
 
@@ -971,26 +1104,26 @@ mod tests {
                 .map(|i| (i.wrapping_mul(73).wrapping_add(len * 19)) as u8)
                 .collect();
 
-            let base64 = encode_base64(&input);
+            let base64 = enc::BASE64_RFC.encode_boxed(&input);
             assert_eq!(
-                try_decode_base64(&base64).as_deref(),
+                BASE64_RFC.try_decode_strict_boxed(&base64).as_deref(),
                 Some(input.as_slice()),
                 "Base64 strict failed to roundtrip {len} data bytes"
             );
             assert_eq!(
-                try_decode_base64ext(&base64).as_deref(),
+                BASE64_RFC.try_decode_extended_boxed(&base64).as_deref(),
                 Some(input.as_slice()),
                 "Base64 extended failed to roundtrip {len} data bytes"
             );
 
-            let base64url = encode_base64url(&input);
+            let base64url = enc::BASE64_URL.encode_boxed(&input);
             assert_eq!(
-                try_decode_base64url(&base64url).as_deref(),
+                BASE64_URL.try_decode_strict_boxed(&base64url).as_deref(),
                 Some(input.as_slice()),
                 "Base64URL strict failed to roundtrip {len} data bytes"
             );
             assert_eq!(
-                try_decode_base64urlext(&base64url).as_deref(),
+                BASE64_URL.try_decode_extended_boxed(&base64url).as_deref(),
                 Some(input.as_slice()),
                 "Base64URL extended failed to roundtrip {len} data bytes"
             );
@@ -1000,7 +1133,7 @@ mod tests {
     #[cfg(feature = "alloc")]
     #[test]
     fn strict_decode_requires_complete_quanta() {
-        for (name, decode) in strict_decoders() {
+        for (name, decoder) in strict_decoders() {
             for input in [
                 b"A".as_slice(),
                 b"Zg".as_slice(),
@@ -1009,7 +1142,11 @@ mod tests {
                 b"AAAAAA".as_slice(),
                 b"AAAAAAA".as_slice(),
             ] {
-                assert_eq!(decode(input), None, "{name} accepted {input:?}");
+                assert_eq!(
+                    decoder.try_decode_strict_boxed(input),
+                    None,
+                    "{name} accepted {input:?}"
+                );
             }
         }
     }
@@ -1019,15 +1156,15 @@ mod tests {
     fn every_decoder_rejects_non_zero_pad_bit_aliases() {
         let padded: &[(&str, &str, &[u8])] = &[("TQ==", "TR==", b"M"), ("TWE=", "TWF=", b"Ma")];
 
-        for (name, decode) in all_decoders() {
+        for (name, decoder, decode) in all_decoders() {
             for &(canonical, alias, plain) in padded {
                 assert_eq!(
-                    decode(canonical.as_bytes()).as_deref(),
+                    decode(decoder, canonical.as_bytes()).as_deref(),
                     Some(plain),
                     "{name} rejected canonical {canonical:?}"
                 );
                 assert_eq!(
-                    decode(alias.as_bytes()),
+                    decode(decoder, alias.as_bytes()),
                     None,
                     "{name} accepted alias {alias:?}"
                 );
@@ -1035,15 +1172,17 @@ mod tests {
         }
 
         let unpadded: &[(&str, &str, &[u8])] = &[("TQ", "TR", b"M"), ("TWE", "TWF", b"Ma")];
-        for (name, decode) in extended_decoders() {
+        for (name, decoder) in extended_decoders() {
             for &(canonical, alias, plain) in unpadded {
                 assert_eq!(
-                    decode(canonical.as_bytes()).as_deref(),
+                    decoder
+                        .try_decode_extended_boxed(canonical.as_bytes())
+                        .as_deref(),
                     Some(plain),
                     "{name} rejected canonical {canonical:?}"
                 );
                 assert_eq!(
-                    decode(alias.as_bytes()),
+                    decoder.try_decode_extended_boxed(alias.as_bytes()),
                     None,
                     "{name} accepted alias {alias:?}"
                 );
@@ -1054,7 +1193,7 @@ mod tests {
     #[cfg(feature = "alloc")]
     #[test]
     fn strict_decode_rejects_non_terminal_or_malformed_padding() {
-        for (name, decode) in strict_decoders() {
+        for (name, decoder) in strict_decoders() {
             for input in [
                 b"====".as_slice(),
                 b"========".as_slice(),
@@ -1066,7 +1205,11 @@ mod tests {
                 b"A===".as_slice(),
                 b"===A".as_slice(),
             ] {
-                assert_eq!(decode(input), None, "{name} accepted {input:?}");
+                assert_eq!(
+                    decoder.try_decode_strict_boxed(input),
+                    None,
+                    "{name} accepted {input:?}"
+                );
             }
         }
     }
@@ -1084,10 +1227,10 @@ mod tests {
             ("concatenated padded values", b"TQ======TQ==", b"MM"),
         ];
 
-        for (name, decode) in extended_decoders() {
+        for (name, decoder) in extended_decoders() {
             for &(category, input, expected) in cases {
                 assert_eq!(
-                    decode(input).as_deref(),
+                    decoder.try_decode_extended_boxed(input).as_deref(),
                     Some(expected),
                     "{name} rejected {category} case {input:?}"
                 );
@@ -1098,13 +1241,17 @@ mod tests {
     #[cfg(feature = "alloc")]
     #[test]
     fn extended_decode_rejects_single_ascii_tails() {
-        for (name, decode) in extended_decoders() {
+        for (name, decoder) in extended_decoders() {
             for input in [
                 b"A".as_slice(),
                 b"AAAAA".as_slice(),
                 b"AAAAAAAAA".as_slice(),
             ] {
-                assert_eq!(decode(input), None, "{name} accepted {input:?}");
+                assert_eq!(
+                    decoder.try_decode_extended_boxed(input),
+                    None,
+                    "{name} accepted {input:?}"
+                );
             }
         }
     }
@@ -1112,7 +1259,7 @@ mod tests {
     #[cfg(feature = "alloc")]
     #[test]
     fn extended_decode_rejects_misplaced_or_partial_padding() {
-        for (name, decode) in extended_decoders() {
+        for (name, decoder) in extended_decoders() {
             for input in [
                 b"=AAA".as_slice(),
                 b"A=AA".as_slice(),
@@ -1123,7 +1270,11 @@ mod tests {
                 b"AA=".as_slice(),
                 b"A==".as_slice(),
             ] {
-                assert_eq!(decode(input), None, "{name} accepted {input:?}");
+                assert_eq!(
+                    decoder.try_decode_extended_boxed(input),
+                    None,
+                    "{name} accepted {input:?}"
+                );
             }
         }
     }
@@ -1131,7 +1282,12 @@ mod tests {
     #[cfg(feature = "alloc")]
     #[test]
     fn decoders_reject_every_non_alphabet_byte_in_any_frame() {
-        fn assert_invalid_bytes_rejected(name: &str, decode: Decode, alphabet: &[u8]) {
+        fn assert_invalid_bytes_rejected(
+            name: &str,
+            decoder: &Decoder<'static>,
+            decode: Decode,
+            alphabet: &[u8],
+        ) {
             for invalid in u8::MIN..=u8::MAX {
                 if invalid == BASE64_PAD || alphabet.contains(&invalid) {
                     continue;
@@ -1141,7 +1297,7 @@ mod tests {
                     let mut input = *b"AAAA";
                     input[position] = invalid;
                     assert_eq!(
-                        decode(&input),
+                        decode(decoder, &input),
                         None,
                         "{name} accepted byte {invalid:#04x} at position {position}"
                     );
@@ -1150,16 +1306,36 @@ mod tests {
                 let mut second_frame = *b"AAAAAAAA";
                 second_frame[6] = invalid;
                 assert_eq!(
-                    decode(&second_frame),
+                    decode(decoder, &second_frame),
                     None,
                     "{name} accepted byte {invalid:#04x} in a later frame"
                 );
             }
         }
 
-        assert_invalid_bytes_rejected("Base64 strict", try_decode_base64, &ENCODER);
-        assert_invalid_bytes_rejected("Base64 extended", try_decode_base64ext, &ENCODER);
-        assert_invalid_bytes_rejected("Base64URL strict", try_decode_base64url, &ENCODER_URL);
-        assert_invalid_bytes_rejected("Base64URL extended", try_decode_base64urlext, &ENCODER_URL);
+        assert_invalid_bytes_rejected(
+            "Base64 strict",
+            &BASE64_RFC,
+            Decoder::try_decode_strict_boxed,
+            &ENCODER,
+        );
+        assert_invalid_bytes_rejected(
+            "Base64 extended",
+            &BASE64_RFC,
+            Decoder::try_decode_extended_boxed,
+            &ENCODER,
+        );
+        assert_invalid_bytes_rejected(
+            "Base64URL strict",
+            &BASE64_URL,
+            Decoder::try_decode_strict_boxed,
+            &ENCODER_URL,
+        );
+        assert_invalid_bytes_rejected(
+            "Base64URL extended",
+            &BASE64_URL,
+            Decoder::try_decode_extended_boxed,
+            &ENCODER_URL,
+        );
     }
 }

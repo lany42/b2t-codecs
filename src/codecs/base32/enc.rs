@@ -20,11 +20,11 @@ use alloc::{boxed::Box, string::String, vec::Vec};
 
 use crate::base32::BASE32_PAD;
 
-const BASE32_RFC: Encoder = const {
+pub(super) const BASE32_RFC: Encoder = const {
     use super::ENCODER;
     Encoder::from_alphabet(&ENCODER)
 };
-const BASE32_HEX: Encoder = const {
+pub(super) const BASE32_HEX: Encoder = const {
     use super::ENCODER_HEX;
     Encoder::from_alphabet(&ENCODER_HEX)
 };
@@ -95,6 +95,11 @@ pub fn encode_base32hex(bytes: &[u8]) -> Box<[u8]> {
 #[must_use = "the encoded size should be used"]
 #[inline]
 pub fn encoded_length_base32(bytes: &[u8]) -> usize {
+    encoded_length(bytes)
+}
+
+#[inline]
+fn encoded_length(bytes: &[u8]) -> usize {
     bytes
         .len()
         .div_ceil(5)
@@ -134,7 +139,7 @@ pub fn try_encode_into_base32hex<'a>(src: &[u8], dst: &'a mut [u8]) -> Option<&'
     BASE32_HEX.encode_into(src, dst)
 }
 
-struct Encoder<'e> {
+pub(super) struct Encoder<'e> {
     encoder: &'e [u8],
 }
 
@@ -156,12 +161,12 @@ impl<'e> Encoder<'e> {
     }
 
     #[cfg(feature = "alloc")]
-    fn encode_boxed(&self, bytes: &[u8]) -> Box<[u8]> {
+    pub(super) fn encode_boxed(&self, bytes: &[u8]) -> Box<[u8]> {
         if bytes.is_empty() {
             return Vec::<u8>::new().into_boxed_slice();
         }
 
-        let payload_len = encoded_length_base32(bytes);
+        let payload_len = encoded_length(bytes);
         let mut dst = Box::<[u8]>::new_uninit_slice(payload_len);
 
         let (chunks, rem) = bytes.as_chunks::<5>();
@@ -192,12 +197,12 @@ impl<'e> Encoder<'e> {
         }
     }
 
-    fn encode_into<'a>(&self, src: &[u8], dst: &'a mut [u8]) -> Option<&'a [u8]> {
+    pub(super) fn encode_into<'a>(&self, src: &[u8], dst: &'a mut [u8]) -> Option<&'a [u8]> {
         if src.is_empty() {
             return Some(&dst[..0]);
         }
 
-        let payload_len = encoded_length_base32(src);
+        let payload_len = encoded_length(src);
         if dst.len() < payload_len {
             return None;
         }
@@ -279,13 +284,13 @@ impl<'e> Encoder<'e> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{BASE32_HEX, BASE32_RFC, Encoder, encoded_length};
 
     #[cfg(feature = "alloc")]
-    type EncodeBytes = fn(&[u8]) -> Box<[u8]>;
+    use super::BASE32_PAD;
+
     #[cfg(feature = "alloc")]
-    type EncodeString = fn(&[u8]) -> String;
-    type EncodeInto = for<'a> fn(&[u8], &'a mut [u8]) -> Option<&'a [u8]>;
+    use alloc::vec::Vec;
 
     #[test]
     fn rfc_4648_base32_test_vectors_pin_encoding() {
@@ -302,46 +307,53 @@ mod tests {
         for &(plain, base32, base32hex) in vectors {
             let mut dst = [0u8; 16];
             assert_eq!(
-                try_encode_into_base32(plain, &mut dst),
+                BASE32_RFC.encode_into(plain, &mut dst),
                 Some(base32.as_bytes())
             );
 
             let mut dst = [0u8; 16];
             assert_eq!(
-                try_encode_into_base32hex(plain, &mut dst),
+                BASE32_HEX.encode_into(plain, &mut dst),
                 Some(base32hex.as_bytes())
             );
 
             #[cfg(feature = "alloc")]
             {
-                assert_eq!(encode_base32(plain).as_ref(), base32.as_bytes());
-                assert_eq!(encode_base32_string(plain), base32);
-                assert_eq!(encode_base32hex(plain).as_ref(), base32hex.as_bytes());
-                assert_eq!(encode_base32hex_string(plain), base32hex);
+                assert_eq!(BASE32_RFC.encode_boxed(plain).as_ref(), base32.as_bytes());
+                assert_eq!(BASE32_RFC.encode_string(plain), base32);
+                assert_eq!(
+                    BASE32_HEX.encode_boxed(plain).as_ref(),
+                    base32hex.as_bytes()
+                );
+                assert_eq!(BASE32_HEX.encode_string(plain), base32hex);
             }
         }
     }
 
     #[test]
     fn encoded_lengths_are_exact() {
-        assert_eq!(encoded_length_base32(b""), 0);
-        assert_eq!(encoded_length_base32(&[0]), 8);
-        assert_eq!(encoded_length_base32(&[0; 4]), 8);
-        assert_eq!(encoded_length_base32(&[0; 5]), 8);
-        assert_eq!(encoded_length_base32(&[0; 6]), 16);
-        assert_eq!(encoded_length_base32(&[0; 32]), 56);
+        assert_eq!(encoded_length(b""), 0);
+        assert_eq!(encoded_length(&[0]), 8);
+        assert_eq!(encoded_length(&[0; 4]), 8);
+        assert_eq!(encoded_length(&[0; 5]), 8);
+        assert_eq!(encoded_length(&[0; 6]), 16);
+        assert_eq!(encoded_length(&[0; 32]), 56);
     }
 
     #[test]
     fn slice_encoders_preserve_destination_bounds() {
-        let codecs: [(&str, EncodeInto, &[u8], u8); 2] = [
-            ("Base32", try_encode_into_base32, b"MZXW6===", b'!'),
-            ("Base32Hex", try_encode_into_base32hex, b"CPNMU===", b'?'),
+        let codecs: [(&str, &Encoder<'_>, &[u8], u8); 2] = [
+            ("Base32", &BASE32_RFC, b"MZXW6===", b'!'),
+            ("Base32Hex", &BASE32_HEX, b"CPNMU===", b'?'),
         ];
 
-        for (name, encode, expected, sentinel) in codecs {
+        for (name, encoder, expected, sentinel) in codecs {
             let mut oversized = [sentinel; 10];
-            assert_eq!(encode(b"foo", &mut oversized), Some(expected), "{name}");
+            assert_eq!(
+                encoder.encode_into(b"foo", &mut oversized),
+                Some(expected),
+                "{name}"
+            );
             assert_eq!(
                 &oversized[expected.len()..],
                 &[sentinel; 2],
@@ -349,11 +361,15 @@ mod tests {
             );
 
             let mut short = [sentinel; 7];
-            assert_eq!(encode(b"foo", &mut short), None, "{name}");
+            assert_eq!(encoder.encode_into(b"foo", &mut short), None, "{name}");
             assert_eq!(short, [sentinel; 7], "{name} modified a short destination");
 
             let mut empty = [sentinel; 1];
-            assert_eq!(encode(b"", &mut empty), Some([].as_slice()), "{name}");
+            assert_eq!(
+                encoder.encode_into(b"", &mut empty),
+                Some([].as_slice()),
+                "{name}"
+            );
             assert_eq!(
                 empty,
                 [sentinel],
@@ -382,19 +398,9 @@ mod tests {
     #[cfg(feature = "alloc")]
     #[test]
     fn byte_slices_of_arbitrary_lengths_encode_canonically() {
-        let codecs: &[(&str, EncodeBytes, EncodeString, &[u8])] = &[
-            (
-                "Base32",
-                encode_base32,
-                encode_base32_string,
-                BASE32_RFC.encoder,
-            ),
-            (
-                "Base32Hex",
-                encode_base32hex,
-                encode_base32hex_string,
-                BASE32_HEX.encoder,
-            ),
+        let codecs: &[(&str, &Encoder<'_>, &[u8])] = &[
+            ("Base32", &BASE32_RFC, BASE32_RFC.encoder),
+            ("Base32Hex", &BASE32_HEX, BASE32_HEX.encoder),
         ];
 
         for len in 0usize..=64 {
@@ -410,11 +416,11 @@ mod tests {
                 _ => unreachable!(),
             };
 
-            for &(name, encode, encode_string, alphabet) in codecs {
-                let encoded = encode(&input);
+            for &(name, encoder, alphabet) in codecs {
+                let encoded = encoder.encode_boxed(&input);
 
                 assert_eq!(encoded.len(), len.div_ceil(5) * 8, "{name}, len {len}");
-                assert_eq!(encode_string(&input).as_bytes(), encoded.as_ref());
+                assert_eq!(encoder.encode_string(&input).as_bytes(), encoded.as_ref());
                 assert!(
                     encoded[..encoded.len() - padding]
                         .iter()

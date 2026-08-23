@@ -255,26 +255,26 @@ impl<'d> Decoder<'d> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::enc::{encode_adobe85, try_encode_ascii85, try_encode_z85};
+    use super::super::enc::{ASCII85 as ASCII85_ENCODER, Z85 as Z85_ENCODER};
     use super::super::{
-        ENCODER_ASCII85, ENCODER_Z85, MAX_ASCII_ASCII85, MAX_ASCII_Z85, MIN_ASCII_ASCII85,
-        MIN_ASCII_Z85,
+        ADOBE85_DEC_PAD, ADOBE85_ZEROS, ENCODER_ASCII85, ENCODER_Z85, MAX_ASCII_ASCII85,
+        MAX_ASCII_Z85, MIN_ASCII_ASCII85, MIN_ASCII_Z85,
     };
-    use super::*;
+    use super::{ASCII85, Decoder, Z85};
 
-    use alloc::vec;
-
-    type Encode = fn(&[u8]) -> Option<Box<[u8]>>;
-    type Decode = fn(&[u8]) -> Option<Box<[u8]>>;
+    use alloc::{vec, vec::Vec};
 
     #[test]
     fn z85_known_vector_decodes_through_byte_and_string_apis() {
         let input = [0x86u8, 0x4f, 0xd2, 0x6f, 0xb5, 0x59, 0xf7, 0x5b];
         let expected = b"HelloWorld";
 
-        assert_eq!(try_decode_z85(expected).as_deref(), Some(input.as_slice()));
         assert_eq!(
-            try_decode_z85_string("HelloWorld").as_deref(),
+            Z85.try_decode_base85(expected).as_deref(),
+            Some(input.as_slice())
+        );
+        assert_eq!(
+            Z85.try_decode_base85_string("HelloWorld").as_deref(),
             Some(input.as_slice())
         );
     }
@@ -285,27 +285,40 @@ mod tests {
         let expected = b"L/669[9<6.";
 
         assert_eq!(
-            try_decode_ascii85(expected).as_deref(),
+            ASCII85.try_decode_base85(expected).as_deref(),
             Some(input.as_slice())
         );
         assert_eq!(
-            try_decode_ascii85_string("L/669[9<6.").as_deref(),
+            ASCII85.try_decode_base85_string("L/669[9<6.").as_deref(),
             Some(input.as_slice())
         );
     }
 
     #[test]
     fn empty_input_decodes_through_all_apis() {
-        assert_eq!(try_decode_ascii85(b"").as_deref(), Some(b"".as_slice()));
         assert_eq!(
-            try_decode_ascii85_string("").as_deref(),
+            ASCII85.try_decode_base85(b"").as_deref(),
             Some(b"".as_slice())
         );
-        assert_eq!(try_decode_z85(b"").as_deref(), Some(b"".as_slice()));
-        assert_eq!(try_decode_z85_string("").as_deref(), Some(b"".as_slice()));
-        assert_eq!(try_decode_adobe85(b"").as_deref(), Some(b"".as_slice()));
         assert_eq!(
-            try_decode_adobe85_string("").as_deref(),
+            ASCII85.try_decode_base85_string("").as_deref(),
+            Some(b"".as_slice())
+        );
+        assert_eq!(Z85.try_decode_base85(b"").as_deref(), Some(b"".as_slice()));
+        assert_eq!(
+            Z85.try_decode_base85_string("").as_deref(),
+            Some(b"".as_slice())
+        );
+        assert_eq!(
+            ASCII85
+                .try_decode_base85ext(b"", ADOBE85_ZEROS, ADOBE85_DEC_PAD)
+                .as_deref(),
+            Some(b"".as_slice())
+        );
+        assert_eq!(
+            ASCII85
+                .try_decode_base85ext_string("", ADOBE85_ZEROS, ADOBE85_DEC_PAD)
+                .as_deref(),
             Some(b"".as_slice())
         );
     }
@@ -313,20 +326,20 @@ mod tests {
     #[test]
     fn decoders_select_the_requested_alphabet() {
         let ascii85_only = b"\"!!!!";
-        assert!(try_decode_ascii85(ascii85_only).is_some());
-        assert_eq!(try_decode_z85(ascii85_only), None);
+        assert!(ASCII85.try_decode_base85(ascii85_only).is_some());
+        assert_eq!(Z85.try_decode_base85(ascii85_only), None);
 
         let z85_only = b"0000{";
-        assert!(try_decode_z85(z85_only).is_some());
-        assert_eq!(try_decode_ascii85(z85_only), None);
-        assert_eq!(try_decode_ascii85(b"!!!!z"), None);
+        assert!(Z85.try_decode_base85(z85_only).is_some());
+        assert_eq!(ASCII85.try_decode_base85(z85_only), None);
+        assert_eq!(ASCII85.try_decode_base85(b"!!!!z"), None);
     }
 
     #[test]
     fn complete_byte_quanta_roundtrip_through_both_alphabets() {
-        let codecs: &[(&str, Encode, Decode)] = &[
-            ("ASCII85", try_encode_ascii85, try_decode_ascii85),
-            ("Z85", try_encode_z85, try_decode_z85),
+        let codecs = &[
+            ("ASCII85", &ASCII85_ENCODER, &ASCII85),
+            ("Z85", &Z85_ENCODER, &Z85),
         ];
 
         for len in (0usize..=64).step_by(4) {
@@ -334,11 +347,13 @@ mod tests {
                 .map(|i| (i.wrapping_mul(73).wrapping_add(len * 19)) as u8)
                 .collect();
 
-            for &(name, encode, decode) in codecs {
-                let encoded = encode(&input).expect("complete byte quanta must encode");
+            for &(name, encoder, decoder) in codecs {
+                let encoded = encoder
+                    .try_encode_base85(&input)
+                    .expect("complete byte quanta must encode");
                 assert_eq!(encoded.len(), len * 5 / 4, "{name}, len {len}");
                 assert_eq!(
-                    decode(&encoded).as_deref(),
+                    decoder.try_decode_base85(&encoded).as_deref(),
                     Some(input.as_slice()),
                     "{name} failed to roundtrip {len} bytes"
                 );
@@ -383,23 +398,26 @@ mod tests {
 
     #[test]
     fn decode_rejects_unpadded_lengths() {
-        let decoders: &[(&str, Decode)] =
-            &[("ASCII85", try_decode_ascii85), ("Z85", try_decode_z85)];
+        let decoders = &[("ASCII85", &ASCII85), ("Z85", &Z85)];
 
         for len in (1..=9).filter(|len| len % 5 != 0) {
             let input = vec![b'0'; len];
-            for &(name, decode) in decoders {
-                assert_eq!(decode(&input), None, "{name} accepted {len} bytes");
+            for &(name, decoder) in decoders {
+                assert_eq!(
+                    decoder.try_decode_base85(&input),
+                    None,
+                    "{name} accepted {len} bytes"
+                );
             }
         }
     }
 
     #[test]
     fn decode_rejects_invalid_bytes_in_any_frame() {
-        let decoders: &[(&str, Decode, u8, [u8; 3])] = &[
+        let decoders = &[
             (
                 "ASCII85",
-                try_decode_ascii85,
+                &ASCII85,
                 b'!',
                 [
                     (MIN_ASCII_ASCII85 - 1) as u8,
@@ -409,19 +427,19 @@ mod tests {
             ),
             (
                 "Z85",
-                try_decode_z85,
+                &Z85,
                 b'0',
                 [(MIN_ASCII_Z85 - 1) as u8, b'"', MAX_ASCII_Z85 as u8],
             ),
         ];
 
-        for &(name, decode, fill, invalids) in decoders {
+        for &(name, decoder, fill, invalids) in decoders {
             for invalid in invalids {
                 for position in 0..5 {
                     let mut input = [fill; 5];
                     input[position] = invalid;
                     assert_eq!(
-                        decode(&input),
+                        decoder.try_decode_base85(&input),
                         None,
                         "{name} accepted byte {invalid:#04x} at position {position}"
                     );
@@ -430,7 +448,7 @@ mod tests {
                 let mut second_frame = [fill; 10];
                 second_frame[7] = invalid;
                 assert_eq!(
-                    decode(&second_frame),
+                    decoder.try_decode_base85(&second_frame),
                     None,
                     "{name} accepted {invalid:#04x}"
                 );
@@ -440,20 +458,44 @@ mod tests {
 
     #[test]
     fn decoders_reject_value_just_above_u32_max() {
-        let codecs: &[(&str, Decode, &[u8], &[u8])] = &[
-            ("ASCII85", try_decode_ascii85, b"s8W-!", b"s8W-\""),
-            ("Z85", try_decode_z85, b"%nSc0", b"%nSc1"),
-            ("Adobe85", try_decode_adobe85, b"s8W-!", b"s8W-\""),
+        let codecs = &[
+            (
+                "ASCII85",
+                &ASCII85,
+                None,
+                b"s8W-!".as_slice(),
+                b"s8W-\"".as_slice(),
+            ),
+            ("Z85", &Z85, None, b"%nSc0".as_slice(), b"%nSc1".as_slice()),
+            (
+                "Adobe85",
+                &ASCII85,
+                Some((ADOBE85_ZEROS, ADOBE85_DEC_PAD)),
+                b"s8W-!".as_slice(),
+                b"s8W-\"".as_slice(),
+            ),
         ];
         let expected = [u8::MAX; 4];
 
-        for &(name, decode, max, overflow) in codecs {
+        for &(name, decoder, extension, max, overflow) in codecs {
+            let decoded_max = match extension {
+                Some((zeros_byte, tail_pad)) => {
+                    decoder.try_decode_base85ext(max, zeros_byte, tail_pad)
+                }
+                None => decoder.try_decode_base85(max),
+            };
             assert_eq!(
-                decode(max).as_deref(),
+                decoded_max.as_deref(),
                 Some(expected.as_slice()),
                 "{name} rejected u32::MAX"
             );
-            assert_eq!(decode(overflow), None, "{name} accepted u32::MAX + 1");
+            let decoded_overflow = match extension {
+                Some((zeros_byte, tail_pad)) => {
+                    decoder.try_decode_base85ext(overflow, zeros_byte, tail_pad)
+                }
+                None => decoder.try_decode_base85(overflow),
+            };
+            assert_eq!(decoded_overflow, None, "{name} accepted u32::MAX + 1");
         }
     }
 
@@ -463,11 +505,15 @@ mod tests {
         let expected = b"L/669[9<6.";
 
         assert_eq!(
-            try_decode_adobe85(expected).as_deref(),
+            ASCII85
+                .try_decode_base85ext(expected, ADOBE85_ZEROS, ADOBE85_DEC_PAD)
+                .as_deref(),
             Some(input.as_slice())
         );
         assert_eq!(
-            try_decode_adobe85_string("L/669[9<6.").as_deref(),
+            ASCII85
+                .try_decode_base85ext_string("L/669[9<6.", ADOBE85_ZEROS, ADOBE85_DEC_PAD)
+                .as_deref(),
             Some(input.as_slice())
         );
     }
@@ -478,10 +524,12 @@ mod tests {
             let input: Vec<u8> = (0..len)
                 .map(|i| (i.wrapping_mul(73).wrapping_add(len * 19)) as u8)
                 .collect();
-            let encoded = encode_adobe85(&input);
+            let encoded = ASCII85_ENCODER.encode_base85ext(&input, ADOBE85_ZEROS);
 
             assert_eq!(
-                try_decode_adobe85(&encoded).as_deref(),
+                ASCII85
+                    .try_decode_base85ext(&encoded, ADOBE85_ZEROS, ADOBE85_DEC_PAD)
+                    .as_deref(),
                 Some(input.as_slice()),
                 "failed to roundtrip {len} data bytes"
             );
@@ -505,7 +553,7 @@ mod tests {
         ];
 
         for &input in inputs {
-            let encoded = encode_adobe85(input);
+            let encoded = ASCII85_ENCODER.encode_base85ext(input, ADOBE85_ZEROS);
 
             for position in 0..=encoded.len() {
                 for whitespace in ASCII_WHITESPACE {
@@ -513,7 +561,9 @@ mod tests {
                     with_whitespace.insert(position, whitespace);
 
                     assert_eq!(
-                        try_decode_adobe85(&with_whitespace).as_deref(),
+                        ASCII85
+                            .try_decode_base85ext(&with_whitespace, ADOBE85_ZEROS, ADOBE85_DEC_PAD,)
+                            .as_deref(),
                         Some(input),
                         "byte API changed {encoded:?} with whitespace {whitespace:#04x} \
                          at position {position}"
@@ -522,7 +572,13 @@ mod tests {
                     let with_whitespace =
                         alloc::str::from_utf8(&with_whitespace).expect("input remains ASCII");
                     assert_eq!(
-                        try_decode_adobe85_string(with_whitespace).as_deref(),
+                        ASCII85
+                            .try_decode_base85ext_string(
+                                with_whitespace,
+                                ADOBE85_ZEROS,
+                                ADOBE85_DEC_PAD,
+                            )
+                            .as_deref(),
                         Some(input),
                         "string API changed {encoded:?} with whitespace {whitespace:#04x} \
                          at position {position}"
@@ -537,7 +593,7 @@ mod tests {
         const ASCII_WHITESPACE: &[u8] = b"\t\n\x0b\x0c\r ";
 
         for input in [b"A".as_slice(), b"AB".as_slice(), b"ABC".as_slice()] {
-            let encoded = encode_adobe85(input);
+            let encoded = ASCII85_ENCODER.encode_base85ext(input, ADOBE85_ZEROS);
             let mut with_whitespace =
                 Vec::with_capacity(encoded.len() * (ASCII_WHITESPACE.len() + 1));
 
@@ -548,7 +604,9 @@ mod tests {
             with_whitespace.extend_from_slice(ASCII_WHITESPACE);
 
             assert_eq!(
-                try_decode_adobe85(&with_whitespace).as_deref(),
+                ASCII85
+                    .try_decode_base85ext(&with_whitespace, ADOBE85_ZEROS, ADOBE85_DEC_PAD)
+                    .as_deref(),
                 Some(input),
                 "dense whitespace changed tail {encoded:?}"
             );
@@ -558,7 +616,11 @@ mod tests {
     #[test]
     fn adobe85_decode_rejects_single_ascii_tails() {
         for input in [b"!".as_slice(), b"!!!!!!".as_slice(), b"z!".as_slice()] {
-            assert_eq!(try_decode_adobe85(input), None, "accepted {input:?}");
+            assert_eq!(
+                ASCII85.try_decode_base85ext(input, ADOBE85_ZEROS, ADOBE85_DEC_PAD),
+                None,
+                "accepted {input:?}"
+            );
         }
     }
 
@@ -566,14 +628,18 @@ mod tests {
     fn adobe85_decode_accepts_compressed_and_uncompressed_zero_chunks() {
         for input in [b"z".as_slice(), b"!!!!!".as_slice()] {
             assert_eq!(
-                try_decode_adobe85(input).as_deref(),
+                ASCII85
+                    .try_decode_base85ext(input, ADOBE85_ZEROS, ADOBE85_DEC_PAD)
+                    .as_deref(),
                 Some([0; 4].as_slice())
             );
         }
 
         for input in [b"z!!!!!".as_slice(), b"!!!!!z".as_slice()] {
             assert_eq!(
-                try_decode_adobe85(input).as_deref(),
+                ASCII85
+                    .try_decode_base85ext(input, ADOBE85_ZEROS, ADOBE85_DEC_PAD)
+                    .as_deref(),
                 Some([0; 8].as_slice())
             );
         }
@@ -586,7 +652,7 @@ mod tests {
                 let mut input = *b"!!!!!";
                 input[position] = invalid;
                 assert_eq!(
-                    try_decode_adobe85(&input),
+                    ASCII85.try_decode_base85ext(&input, ADOBE85_ZEROS, ADOBE85_DEC_PAD),
                     None,
                     "accepted byte {invalid:#04x} at position {position}"
                 );
@@ -594,7 +660,10 @@ mod tests {
         }
 
         let mut second_frame = *b"!!!!!!!!!!";
-        second_frame[7] = super::super::ADOBE85_ZEROS;
-        assert_eq!(try_decode_adobe85(&second_frame), None);
+        second_frame[7] = ADOBE85_ZEROS;
+        assert_eq!(
+            ASCII85.try_decode_base85ext(&second_frame, ADOBE85_ZEROS, ADOBE85_DEC_PAD),
+            None
+        );
     }
 }

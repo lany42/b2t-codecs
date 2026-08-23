@@ -16,11 +16,11 @@
 //!     Some("Hello"),
 //! );
 //! ```
-const ASCII85: Encoder = const {
+pub(super) const ASCII85: Encoder = const {
     use super::ENCODER_ASCII85;
     Encoder::from_alphabet(&ENCODER_ASCII85)
 };
-const Z85: Encoder = const {
+pub(super) const Z85: Encoder = const {
     use super::ENCODER_Z85;
     Encoder::from_alphabet(&ENCODER_Z85)
 };
@@ -98,7 +98,7 @@ pub fn try_encode_z85(bytes: &[u8]) -> Option<Box<[u8]>> {
     Z85.try_encode_base85(bytes)
 }
 
-struct Encoder<'e> {
+pub(super) struct Encoder<'e> {
     encoder: &'e [u8],
 }
 
@@ -125,7 +125,7 @@ impl<'e> Encoder<'e> {
         unsafe { String::from_utf8_unchecked(encoded.into_vec()) }
     }
 
-    fn try_encode_base85(&self, bytes: &[u8]) -> Option<Box<[u8]>> {
+    pub(super) fn try_encode_base85(&self, bytes: &[u8]) -> Option<Box<[u8]>> {
         if bytes.is_empty() {
             return Some(Vec::<u8>::new().into_boxed_slice());
         }
@@ -153,7 +153,7 @@ impl<'e> Encoder<'e> {
         Some(ret.into_boxed_slice())
     }
 
-    fn encode_base85ext(&self, bytes: &[u8], zeros_byte: u8) -> Box<[u8]> {
+    pub(super) fn encode_base85ext(&self, bytes: &[u8], zeros_byte: u8) -> Box<[u8]> {
         if bytes.is_empty() {
             return Vec::<u8>::new().into_boxed_slice();
         }
@@ -227,17 +227,19 @@ impl<'e> Encoder<'e> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
-    type Encode = fn(&[u8]) -> Option<Box<[u8]>>;
+    use super::super::ADOBE85_ZEROS;
+    use super::{ASCII85, Z85};
 
     #[test]
     fn z85_known_vector_encodes_through_byte_and_string_apis() {
         let input = [0x86u8, 0x4f, 0xd2, 0x6f, 0xb5, 0x59, 0xf7, 0x5b];
         let expected = b"HelloWorld";
 
-        assert_eq!(&*try_encode_z85(&input).unwrap(), expected);
-        assert_eq!(try_encode_z85_string(&input).as_deref(), Some("HelloWorld"));
+        assert_eq!(&*Z85.try_encode_base85(&input).unwrap(), expected);
+        assert_eq!(
+            Z85.try_encode_base85_string(&input).as_deref(),
+            Some("HelloWorld")
+        );
     }
 
     #[test]
@@ -245,44 +247,50 @@ mod tests {
         let input = [0x86u8, 0x4f, 0xd2, 0x6f, 0xb5, 0x59, 0xf7, 0x5b];
         let expected = b"L/669[9<6.";
 
-        assert_eq!(&*try_encode_ascii85(&input).unwrap(), expected);
+        assert_eq!(&*ASCII85.try_encode_base85(&input).unwrap(), expected);
         assert_eq!(
-            try_encode_ascii85_string(&input).as_deref(),
+            ASCII85.try_encode_base85_string(&input).as_deref(),
             Some("L/669[9<6.")
         );
     }
 
     #[test]
     fn empty_input_encodes_through_all_apis() {
-        assert_eq!(try_encode_ascii85(b"").as_deref(), Some(b"".as_slice()));
-        assert_eq!(try_encode_ascii85_string(b"").as_deref(), Some(""));
-        assert_eq!(try_encode_z85(b"").as_deref(), Some(b"".as_slice()));
-        assert_eq!(try_encode_z85_string(b"").as_deref(), Some(""));
-        assert_eq!(&*encode_adobe85(b""), b"");
-        assert_eq!(encode_adobe85_string(b""), "");
+        assert_eq!(
+            ASCII85.try_encode_base85(b"").as_deref(),
+            Some(b"".as_slice())
+        );
+        assert_eq!(ASCII85.try_encode_base85_string(b"").as_deref(), Some(""));
+        assert_eq!(Z85.try_encode_base85(b"").as_deref(), Some(b"".as_slice()));
+        assert_eq!(Z85.try_encode_base85_string(b"").as_deref(), Some(""));
+        assert_eq!(&*ASCII85.encode_base85ext(b"", ADOBE85_ZEROS), b"");
+        assert_eq!(ASCII85.encode_base85ext_string(b"", ADOBE85_ZEROS), "");
     }
 
     #[test]
     fn encoders_select_the_requested_alphabet() {
         assert_eq!(
-            try_encode_ascii85(&[0; 4]).as_deref(),
+            ASCII85.try_encode_base85(&[0; 4]).as_deref(),
             Some(b"!!!!!".as_slice())
         );
         assert_eq!(
-            try_encode_z85(&[0; 4]).as_deref(),
+            Z85.try_encode_base85(&[0; 4]).as_deref(),
             Some(b"00000".as_slice())
         );
     }
 
     #[test]
     fn encode_rejects_unpadded_lengths() {
-        let encoders: &[(&str, Encode)] =
-            &[("ASCII85", try_encode_ascii85), ("Z85", try_encode_z85)];
+        let encoders = &[("ASCII85", &ASCII85), ("Z85", &Z85)];
 
         for len in [1, 2, 3, 5, 6, 7] {
             let input = alloc::vec![0u8; len];
-            for &(name, encode) in encoders {
-                assert_eq!(encode(&input), None, "{name} accepted {len} bytes");
+            for &(name, encoder) in encoders {
+                assert_eq!(
+                    encoder.try_encode_base85(&input),
+                    None,
+                    "{name} accepted {len} bytes"
+                );
             }
         }
     }
@@ -292,8 +300,11 @@ mod tests {
         let input = [0x86u8, 0x4f, 0xd2, 0x6f, 0xb5, 0x59, 0xf7, 0x5b];
         let expected = b"L/669[9<6.";
 
-        assert_eq!(&*encode_adobe85(&input), expected);
-        assert_eq!(encode_adobe85_string(&input), "L/669[9<6.");
+        assert_eq!(&*ASCII85.encode_base85ext(&input, ADOBE85_ZEROS), expected);
+        assert_eq!(
+            ASCII85.encode_base85ext_string(&input, ADOBE85_ZEROS),
+            "L/669[9<6."
+        );
     }
 
     #[test]
@@ -306,7 +317,10 @@ mod tests {
         ];
 
         for &(input, expected) in cases {
-            assert_eq!(encode_adobe85(input).as_ref(), expected);
+            assert_eq!(
+                ASCII85.encode_base85ext(input, ADOBE85_ZEROS).as_ref(),
+                expected
+            );
         }
     }
 
@@ -321,7 +335,10 @@ mod tests {
         ];
 
         for &(input, expected) in cases {
-            assert_eq!(encode_adobe85(input).as_ref(), expected);
+            assert_eq!(
+                ASCII85.encode_base85ext(input, ADOBE85_ZEROS).as_ref(),
+                expected
+            );
         }
     }
 }

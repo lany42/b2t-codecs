@@ -19,11 +19,11 @@
 #[cfg(feature = "alloc")]
 use alloc::{boxed::Box, string::String, vec::Vec};
 
-const BASE16_LOWER: Encoder = const {
+pub(super) const BASE16_LOWER: Encoder = const {
     use super::ENCODER_LOWER;
     Encoder::from_alphabet(&ENCODER_LOWER)
 };
-const BASE16_UPPER: Encoder = const {
+pub(super) const BASE16_UPPER: Encoder = const {
     use super::ENCODER_UPPER;
     Encoder::from_alphabet(&ENCODER_UPPER)
 };
@@ -94,6 +94,11 @@ pub fn encode_base16upper(bytes: &[u8]) -> Box<[u8]> {
 #[must_use = "the encoded size should be used"]
 #[inline]
 pub fn encoded_length_base16(bytes: &[u8]) -> usize {
+    encoded_length(bytes)
+}
+
+#[inline]
+fn encoded_length(bytes: &[u8]) -> usize {
     bytes
         .len()
         .checked_mul(2)
@@ -132,7 +137,7 @@ pub fn try_encode_into_base16upper<'a>(src: &[u8], dst: &'a mut [u8]) -> Option<
     BASE16_UPPER.encode_into(src, dst)
 }
 
-struct Encoder<'e> {
+pub(super) struct Encoder<'e> {
     encoder: &'e [u8],
 }
 
@@ -154,11 +159,11 @@ impl<'e> Encoder<'e> {
     }
 
     #[cfg(feature = "alloc")]
-    fn encode_boxed(&self, bytes: &[u8]) -> Box<[u8]> {
+    pub(super) fn encode_boxed(&self, bytes: &[u8]) -> Box<[u8]> {
         if bytes.is_empty() {
             return Vec::<u8>::new().into_boxed_slice();
         }
-        let payload_len = encoded_length_base16(bytes);
+        let payload_len = encoded_length(bytes);
         let mut dst = Box::<[u8]>::new_uninit_slice(payload_len);
 
         // SAFETY:
@@ -175,12 +180,12 @@ impl<'e> Encoder<'e> {
         }
     }
 
-    fn encode_into<'a>(&self, src: &[u8], dst: &'a mut [u8]) -> Option<&'a [u8]> {
+    pub(super) fn encode_into<'a>(&self, src: &[u8], dst: &'a mut [u8]) -> Option<&'a [u8]> {
         if src.is_empty() {
             return Some(&dst[..0]);
         }
 
-        let payload_len = encoded_length_base16(src);
+        let payload_len = encoded_length(src);
         if dst.len() < payload_len {
             return None;
         }
@@ -235,12 +240,10 @@ impl<'e> Encoder<'e> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{BASE16_LOWER, BASE16_UPPER, Encoder, encoded_length};
 
     #[cfg(feature = "alloc")]
-    type EncodeBytes = fn(&[u8]) -> Box<[u8]>;
-    #[cfg(feature = "alloc")]
-    type EncodeString = fn(&[u8]) -> String;
+    use alloc::vec::Vec;
 
     #[cfg(feature = "alloc")]
     #[test]
@@ -258,45 +261,47 @@ mod tests {
         ];
 
         for &(plain, lower, upper) in vectors {
-            assert_eq!(encode_base16(plain).as_ref(), lower.as_bytes());
-            assert_eq!(encode_base16_string(plain), lower);
-            assert_eq!(encode_base16upper(plain).as_ref(), upper.as_bytes());
-            assert_eq!(encode_base16upper_string(plain), upper);
+            assert_eq!(BASE16_LOWER.encode_boxed(plain).as_ref(), lower.as_bytes());
+            assert_eq!(BASE16_LOWER.encode_string(plain), lower);
+            assert_eq!(BASE16_UPPER.encode_boxed(plain).as_ref(), upper.as_bytes());
+            assert_eq!(BASE16_UPPER.encode_string(plain), upper);
         }
     }
 
     #[test]
     fn encoded_lengths_are_exact() {
-        assert_eq!(encoded_length_base16(b""), 0);
-        assert_eq!(encoded_length_base16(&[0]), 2);
-        assert_eq!(encoded_length_base16(&[0; 32]), 64);
+        assert_eq!(encoded_length(b""), 0);
+        assert_eq!(encoded_length(&[0]), 2);
+        assert_eq!(encoded_length(&[0; 32]), 64);
     }
 
     #[test]
     fn slice_encoders_obey_the_destination_contract() {
-        type EncodeInto = for<'a> fn(&[u8], &'a mut [u8]) -> Option<&'a [u8]>;
-
-        let encoders: &[(&str, EncodeInto, &[u8])] = &[
-            ("lowercase", try_encode_into_base16, b"00abff"),
-            ("uppercase", try_encode_into_base16upper, b"00ABFF"),
+        let encoders: &[(&str, &Encoder<'_>, &[u8])] = &[
+            ("lowercase", &BASE16_LOWER, b"00abff"),
+            ("uppercase", &BASE16_UPPER, b"00ABFF"),
         ];
 
         for &(name, encode, expected) in encoders {
             let mut dst = [b'!'; 10];
             assert_eq!(
-                encode(&[0x00, 0xab, 0xff], &mut dst),
+                encode.encode_into(&[0x00, 0xab, 0xff], &mut dst),
                 Some(expected),
                 "{name}",
             );
             assert_eq!(&dst[expected.len()..], b"!!!!", "{name}");
 
             let mut untouched = [b'x'; 1];
-            let encoded = encode(b"", &mut untouched).unwrap();
+            let encoded = encode.encode_into(b"", &mut untouched).unwrap();
             assert!(encoded.is_empty(), "{name}");
             assert_eq!(untouched, [b'x'], "{name}");
 
             let mut short = [b'?'; 3];
-            assert_eq!(encode(&[0xab, 0xcd], &mut short), None, "{name}");
+            assert_eq!(
+                encode.encode_into(&[0xab, 0xcd], &mut short),
+                None,
+                "{name}"
+            );
             assert_eq!(short, [b'?'; 3], "{name}");
         }
     }
@@ -309,13 +314,13 @@ mod tests {
         }
 
         let mut lower = [0u8; 512];
-        let lower = try_encode_into_base16(&input, &mut lower).unwrap();
-        assert_eq!(lower.len(), encoded_length_base16(&input));
+        let lower = BASE16_LOWER.encode_into(&input, &mut lower).unwrap();
+        assert_eq!(lower.len(), encoded_length(&input));
         assert!(lower.iter().all(|byte| BASE16_LOWER.encoder.contains(byte)));
 
         let mut upper = [0u8; 512];
-        let upper = try_encode_into_base16upper(&input, &mut upper).unwrap();
-        assert_eq!(upper.len(), encoded_length_base16(&input));
+        let upper = BASE16_UPPER.encode_into(&input, &mut upper).unwrap();
+        assert_eq!(upper.len(), encoded_length(&input));
         assert!(upper.iter().all(|byte| BASE16_UPPER.encoder.contains(byte)));
     }
 
@@ -339,19 +344,9 @@ mod tests {
     #[cfg(feature = "alloc")]
     #[test]
     fn arbitrary_byte_slices_encode_to_twice_the_input_length() {
-        let encoders: &[(&str, EncodeBytes, EncodeString, &[u8])] = &[
-            (
-                "lowercase",
-                encode_base16,
-                encode_base16_string,
-                BASE16_LOWER.encoder,
-            ),
-            (
-                "uppercase",
-                encode_base16upper,
-                encode_base16upper_string,
-                BASE16_UPPER.encoder,
-            ),
+        let encoders: &[(&str, &Encoder<'_>, &[u8])] = &[
+            ("lowercase", &BASE16_LOWER, BASE16_LOWER.encoder),
+            ("uppercase", &BASE16_UPPER, BASE16_UPPER.encoder),
         ];
 
         for len in 0usize..=64 {
@@ -359,10 +354,10 @@ mod tests {
                 .map(|i| (i.wrapping_mul(73).wrapping_add(len * 19)) as u8)
                 .collect();
 
-            for &(name, encode, encode_string, alphabet) in encoders {
-                let encoded = encode(&input);
+            for &(name, encode, alphabet) in encoders {
+                let encoded = encode.encode_boxed(&input);
                 assert_eq!(encoded.len(), len * 2, "{name}, len {len}");
-                assert_eq!(encode_string(&input).as_bytes(), encoded.as_ref());
+                assert_eq!(encode.encode_string(&input).as_bytes(), encoded.as_ref());
                 assert!(
                     encoded.iter().all(|byte| alphabet.contains(byte)),
                     "{name} emitted a byte outside its alphabet for len {len}"

@@ -119,6 +119,11 @@ pub fn try_decode_from_base32hex<'a>(src: &[u8], dst: &'a mut [u8]) -> Option<&'
 #[must_use = "the decoded size should be used"]
 #[inline]
 pub fn decoded_length_base32(src: &[u8]) -> Option<usize> {
+    decoded_length(src)
+}
+
+#[inline]
+fn decoded_length(src: &[u8]) -> Option<usize> {
     let len = src.len();
     if !len.is_multiple_of(8) {
         return None;
@@ -182,7 +187,7 @@ impl<'d> Decoder<'d> {
             return Some(Vec::<u8>::new().into_boxed_slice());
         }
 
-        let payload_len = decoded_length_base32(base32)?;
+        let payload_len = decoded_length(base32)?;
 
         let (chunks, []) = base32.as_chunks::<8>() else {
             unreachable!("decoded_length_base32 requires complete eight-symbol quanta")
@@ -248,7 +253,7 @@ impl<'d> Decoder<'d> {
             return Some(&dst[..0]);
         }
 
-        let payload_len = decoded_length_base32(src)?;
+        let payload_len = decoded_length(src)?;
         if dst.len() < payload_len {
             return None;
         }
@@ -465,54 +470,48 @@ impl<'d> Decoder<'d> {
 
 #[cfg(test)]
 mod tests {
-    #[cfg(feature = "alloc")]
-    use super::super::enc::{encode_base32, encode_base32hex};
-    use super::super::enc::{try_encode_into_base32, try_encode_into_base32hex};
+    use super::super::enc;
     use super::super::{ENCODER, ENCODER_HEX};
-    use super::*;
+    use super::{BASE32_HEX, BASE32_RFC, Decoder, decoded_length};
 
     #[cfg(feature = "alloc")]
-    use alloc::vec;
+    use super::BASE32_PAD;
 
     #[cfg(feature = "alloc")]
-    type Encode = fn(&[u8]) -> Box<[u8]>;
-    #[cfg(feature = "alloc")]
-    type Decode = fn(&[u8]) -> Option<Box<[u8]>>;
-    type EncodeInto = for<'a> fn(&[u8], &'a mut [u8]) -> Option<&'a [u8]>;
-    type DecodeInto = for<'a> fn(&[u8], &'a mut [u8]) -> Option<&'a [u8]>;
+    use alloc::{vec, vec::Vec};
 
     #[cfg(feature = "alloc")]
-    fn codecs() -> [(&'static str, Encode, Decode, &'static [u8]); 2] {
+    fn codecs() -> [(
+        &'static str,
+        &'static enc::Encoder<'static>,
+        &'static Decoder<'static>,
+        &'static [u8],
+    ); 2] {
         [
-            ("Base32", encode_base32, try_decode_base32, &ENCODER),
-            (
-                "Base32Hex",
-                encode_base32hex,
-                try_decode_base32hex,
-                &ENCODER_HEX,
-            ),
+            ("Base32", &enc::BASE32_RFC, &BASE32_RFC, &ENCODER),
+            ("Base32Hex", &enc::BASE32_HEX, &BASE32_HEX, &ENCODER_HEX),
         ]
     }
 
     #[test]
     fn decoded_lengths_are_exact_and_require_complete_quanta() {
-        assert_eq!(decoded_length_base32(b""), Some(0));
-        assert_eq!(decoded_length_base32(b"A"), None);
-        assert_eq!(decoded_length_base32(b"AAAAAAA"), None);
-        assert_eq!(decoded_length_base32(b"AAAAAAAA"), Some(5));
-        assert_eq!(decoded_length_base32(b"MY======"), Some(1));
-        assert_eq!(decoded_length_base32(b"MZXQ===="), Some(2));
-        assert_eq!(decoded_length_base32(b"MZXW6==="), Some(3));
-        assert_eq!(decoded_length_base32(b"MZXW6YQ="), Some(4));
-        assert_eq!(decoded_length_base32(b"MZXW6YTB"), Some(5));
-        assert_eq!(decoded_length_base32(b"MZXW6YTBOI======"), Some(6));
-        assert_eq!(decoded_length_base32(b"AAAAAAAAAAAAAAAA"), Some(10));
-        assert_eq!(decoded_length_base32(b"AAAAAA=="), None);
-        assert_eq!(decoded_length_base32(b"AAA====="), None);
-        assert_eq!(decoded_length_base32(b"A======="), None);
-        assert_eq!(decoded_length_base32(b"========"), None);
+        assert_eq!(decoded_length(b""), Some(0));
+        assert_eq!(decoded_length(b"A"), None);
+        assert_eq!(decoded_length(b"AAAAAAA"), None);
+        assert_eq!(decoded_length(b"AAAAAAAA"), Some(5));
+        assert_eq!(decoded_length(b"MY======"), Some(1));
+        assert_eq!(decoded_length(b"MZXQ===="), Some(2));
+        assert_eq!(decoded_length(b"MZXW6==="), Some(3));
+        assert_eq!(decoded_length(b"MZXW6YQ="), Some(4));
+        assert_eq!(decoded_length(b"MZXW6YTB"), Some(5));
+        assert_eq!(decoded_length(b"MZXW6YTBOI======"), Some(6));
+        assert_eq!(decoded_length(b"AAAAAAAAAAAAAAAA"), Some(10));
+        assert_eq!(decoded_length(b"AAAAAA=="), None);
+        assert_eq!(decoded_length(b"AAA====="), None);
+        assert_eq!(decoded_length(b"A======="), None);
+        assert_eq!(decoded_length(b"========"), None);
         // Length calculation deliberately leaves non-terminal padding validation to decoding.
-        assert_eq!(decoded_length_base32(b"A===A==="), Some(3));
+        assert_eq!(decoded_length(b"A===A==="), Some(3));
     }
 
     #[test]
@@ -530,27 +529,30 @@ mod tests {
         for &(plain, base32, base32hex) in vectors {
             #[cfg(feature = "alloc")]
             {
-                assert_eq!(try_decode_base32(base32.as_bytes()).as_deref(), Some(plain));
-                assert_eq!(try_decode_base32_string(base32).as_deref(), Some(plain));
                 assert_eq!(
-                    try_decode_base32hex(base32hex.as_bytes()).as_deref(),
+                    BASE32_RFC.try_decode_boxed(base32.as_bytes()).as_deref(),
+                    Some(plain)
+                );
+                assert_eq!(BASE32_RFC.try_decode_string(base32).as_deref(), Some(plain));
+                assert_eq!(
+                    BASE32_HEX.try_decode_boxed(base32hex.as_bytes()).as_deref(),
                     Some(plain)
                 );
                 assert_eq!(
-                    try_decode_base32hex_string(base32hex).as_deref(),
+                    BASE32_HEX.try_decode_string(base32hex).as_deref(),
                     Some(plain)
                 );
             }
 
             let mut dst = [0u8; 6];
             assert_eq!(
-                try_decode_from_base32(base32.as_bytes(), &mut dst),
+                BASE32_RFC.try_decode_into(base32.as_bytes(), &mut dst),
                 Some(plain)
             );
 
             let mut dst = [0u8; 6];
             assert_eq!(
-                try_decode_from_base32hex(base32hex.as_bytes(), &mut dst),
+                BASE32_HEX.try_decode_into(base32hex.as_bytes(), &mut dst),
                 Some(plain)
             );
         }
@@ -558,19 +560,19 @@ mod tests {
 
     #[test]
     fn non_allocating_decoders_preserve_destination_bounds() {
-        let codecs: [(&str, DecodeInto, &[u8]); 2] = [
-            ("Base32", try_decode_from_base32, b"MZXW6YTBOI======"),
-            ("Base32Hex", try_decode_from_base32hex, b"CPNMUOJ1E8======"),
+        let codecs: [(&str, &Decoder<'_>, &[u8]); 2] = [
+            ("Base32", &BASE32_RFC, b"MZXW6YTBOI======"),
+            ("Base32Hex", &BASE32_HEX, b"CPNMUOJ1E8======"),
         ];
 
-        for (name, decode, encoded) in codecs {
+        for (name, decoder, encoded) in codecs {
             let mut short = [0xa5; 5];
-            assert_eq!(decode(encoded, &mut short), None, "{name}");
+            assert_eq!(decoder.try_decode_into(encoded, &mut short), None, "{name}");
             assert_eq!(short, [0xa5; 5], "{name} modified a short destination");
 
             let mut oversized = [0xa5; 8];
             assert_eq!(
-                decode(encoded, &mut oversized),
+                decoder.try_decode_into(encoded, &mut oversized),
                 Some(b"foobar".as_slice()),
                 "{name}"
             );
@@ -584,12 +586,12 @@ mod tests {
 
     #[test]
     fn non_allocating_decoders_reject_noncanonical_inputs() {
-        let codecs: [(&str, DecodeInto, &[u8]); 2] = [
-            ("Base32", try_decode_from_base32, b"MZ======"),
-            ("Base32Hex", try_decode_from_base32hex, b"CP======"),
+        let codecs: [(&str, &Decoder<'_>, &[u8]); 2] = [
+            ("Base32", &BASE32_RFC, b"MZ======"),
+            ("Base32Hex", &BASE32_HEX, b"CP======"),
         ];
 
-        for (name, decode, non_zero_pad_bits) in codecs {
+        for (name, decoder, non_zero_pad_bits) in codecs {
             let mut dst = [0u8; 10];
             for input in [
                 b"A".as_slice(),
@@ -598,7 +600,11 @@ mod tests {
                 b"AA======AAAAAAAA".as_slice(),
                 non_zero_pad_bits,
             ] {
-                assert_eq!(decode(input, &mut dst), None, "{name} accepted {input:?}");
+                assert_eq!(
+                    decoder.try_decode_into(input, &mut dst),
+                    None,
+                    "{name} accepted {input:?}"
+                );
             }
         }
     }
@@ -607,13 +613,13 @@ mod tests {
     fn three_pad_tail_decoding_preserves_all_three_bytes() {
         let mut dst = [0; 3];
         assert_eq!(
-            try_decode_from_base32(b"MZXW6===", &mut dst),
+            BASE32_RFC.try_decode_into(b"MZXW6===", &mut dst),
             Some(b"foo".as_slice())
         );
 
         let mut dst = [0; 3];
         assert_eq!(
-            try_decode_from_base32hex(b"CPNMU===", &mut dst),
+            BASE32_HEX.try_decode_into(b"CPNMU===", &mut dst),
             Some(b"foo".as_slice())
         );
     }
@@ -622,18 +628,18 @@ mod tests {
     fn decoders_select_the_requested_alphabet() {
         let mut dst = [0; 1];
         assert_eq!(
-            try_decode_from_base32(b"WA======", &mut dst),
+            BASE32_RFC.try_decode_into(b"WA======", &mut dst),
             Some([0xb0].as_slice())
         );
 
         let mut dst = [0; 1];
         assert_eq!(
-            try_decode_from_base32hex(b"M0======", &mut dst),
+            BASE32_HEX.try_decode_into(b"M0======", &mut dst),
             Some([0xb0].as_slice())
         );
 
-        assert_eq!(try_decode_from_base32(b"M0======", &mut dst), None);
-        assert_eq!(try_decode_from_base32hex(b"WA======", &mut dst), None);
+        assert_eq!(BASE32_RFC.try_decode_into(b"M0======", &mut dst), None);
+        assert_eq!(BASE32_HEX.try_decode_into(b"WA======", &mut dst), None);
     }
 
     #[test]
@@ -669,13 +675,9 @@ mod tests {
 
     #[test]
     fn arbitrary_byte_slices_roundtrip_through_non_allocating_codecs() {
-        let codecs: [(&str, EncodeInto, DecodeInto); 2] = [
-            ("Base32", try_encode_into_base32, try_decode_from_base32),
-            (
-                "Base32Hex",
-                try_encode_into_base32hex,
-                try_decode_from_base32hex,
-            ),
+        let codecs: [(&str, &enc::Encoder<'_>, &Decoder<'_>); 2] = [
+            ("Base32", &enc::BASE32_RFC, &BASE32_RFC),
+            ("Base32Hex", &enc::BASE32_HEX, &BASE32_HEX),
         ];
 
         let mut input = [0u8; 64];
@@ -687,10 +689,10 @@ mod tests {
                 *byte = (i.wrapping_mul(73).wrapping_add(len * 19)) as u8;
             }
 
-            for (name, encode, decode) in codecs {
-                let encoded = encode(&input[..len], &mut encoded).unwrap();
+            for (name, encoder, decoder) in codecs {
+                let encoded = encoder.encode_into(&input[..len], &mut encoded).unwrap();
                 assert_eq!(
-                    decode(encoded, &mut decoded),
+                    decoder.try_decode_into(encoded, &mut decoded),
                     Some(&input[..len]),
                     "{name} failed to roundtrip {len} data bytes"
                 );
@@ -706,10 +708,10 @@ mod tests {
                 .map(|i| (i.wrapping_mul(73).wrapping_add(len * 19)) as u8)
                 .collect();
 
-            for (name, encode, decode, _) in codecs() {
-                let encoded = encode(&input);
+            for (name, encoder, decoder, _) in codecs() {
+                let encoded = encoder.encode_boxed(&input);
                 assert_eq!(
-                    decode(&encoded).as_deref(),
+                    decoder.try_decode_boxed(&encoded).as_deref(),
                     Some(input.as_slice()),
                     "{name} failed to roundtrip {len} data bytes"
                 );
@@ -720,14 +722,18 @@ mod tests {
     #[cfg(feature = "alloc")]
     #[test]
     fn strict_decode_requires_complete_quanta() {
-        for (name, _, decode, alphabet) in codecs() {
+        for (name, _, decoder, alphabet) in codecs() {
             for len in 1usize..16 {
                 if len.is_multiple_of(8) {
                     continue;
                 }
 
                 let input = vec![alphabet[0]; len];
-                assert_eq!(decode(&input), None, "{name} accepted {len} symbols");
+                assert_eq!(
+                    decoder.try_decode_boxed(&input),
+                    None,
+                    "{name} accepted {len} symbols"
+                );
             }
         }
     }
@@ -743,14 +749,14 @@ mod tests {
             (4, 6, 0x07),
         ];
 
-        for (name, encode, decode, alphabet) in codecs() {
+        for (name, encoder, decoder, alphabet) in codecs() {
             for (len, symbol, pad_bit_mask) in tails {
                 let input: Vec<u8> = (0..len)
                     .map(|i| (i.wrapping_mul(83).wrapping_add(0x5b)) as u8)
                     .collect();
-                let canonical = encode(&input);
+                let canonical = encoder.encode_boxed(&input);
                 assert_eq!(
-                    decode(&canonical).as_deref(),
+                    decoder.try_decode_boxed(&canonical).as_deref(),
                     Some(input.as_slice()),
                     "{name} rejected its canonical {len}-byte tail"
                 );
@@ -766,7 +772,7 @@ mod tests {
                     let mut alias = canonical.to_vec();
                     alias[symbol] = alphabet[(digit | pad_bits) as usize];
                     assert_eq!(
-                        decode(&alias),
+                        decoder.try_decode_boxed(&alias),
                         None,
                         "{name} accepted non-zero pad bits {pad_bits:#04x} \
                          for a {len}-byte tail: {alias:?}"
@@ -779,12 +785,12 @@ mod tests {
     #[cfg(feature = "alloc")]
     #[test]
     fn strict_decode_rejects_non_terminal_or_malformed_padding() {
-        for (name, encode, decode, _) in codecs() {
+        for (name, encoder, decoder, _) in codecs() {
             for len in 1usize..=4 {
-                let mut non_terminal = encode(&vec![0x5a; len]).into_vec();
-                non_terminal.extend_from_slice(&encode(b"abcde"));
+                let mut non_terminal = encoder.encode_boxed(&vec![0x5a; len]).into_vec();
+                non_terminal.extend_from_slice(&encoder.encode_boxed(b"abcde"));
                 assert_eq!(
-                    decode(&non_terminal),
+                    decoder.try_decode_boxed(&non_terminal),
                     None,
                     "{name} accepted padding before the final quantum"
                 );
@@ -804,7 +810,11 @@ mod tests {
                 b"AAA=====".as_slice(),
                 b"AAAAAA==".as_slice(),
             ] {
-                assert_eq!(decode(input), None, "{name} accepted {input:?}");
+                assert_eq!(
+                    decoder.try_decode_boxed(input),
+                    None,
+                    "{name} accepted {input:?}"
+                );
             }
         }
     }
@@ -812,7 +822,7 @@ mod tests {
     #[cfg(feature = "alloc")]
     #[test]
     fn decoders_reject_every_non_alphabet_byte_in_any_frame() {
-        fn assert_invalid_bytes_rejected(name: &str, decode: Decode, alphabet: &[u8]) {
+        fn assert_invalid_bytes_rejected(name: &str, decoder: &Decoder<'_>, alphabet: &[u8]) {
             for invalid in u8::MIN..=u8::MAX {
                 if invalid == BASE32_PAD || alphabet.contains(&invalid) {
                     continue;
@@ -822,7 +832,7 @@ mod tests {
                     let mut input = [alphabet[0]; 8];
                     input[position] = invalid;
                     assert_eq!(
-                        decode(&input),
+                        decoder.try_decode_boxed(&input),
                         None,
                         "{name} accepted byte {invalid:#04x} at position {position}"
                     );
@@ -831,14 +841,14 @@ mod tests {
                 let mut second_frame = [alphabet[0]; 16];
                 second_frame[14] = invalid;
                 assert_eq!(
-                    decode(&second_frame),
+                    decoder.try_decode_boxed(&second_frame),
                     None,
                     "{name} accepted byte {invalid:#04x} in a later frame"
                 );
             }
         }
 
-        assert_invalid_bytes_rejected("Base32", try_decode_base32, &ENCODER);
-        assert_invalid_bytes_rejected("Base32Hex", try_decode_base32hex, &ENCODER_HEX);
+        assert_invalid_bytes_rejected("Base32", &BASE32_RFC, &ENCODER);
+        assert_invalid_bytes_rejected("Base32Hex", &BASE32_HEX, &ENCODER_HEX);
     }
 }

@@ -108,6 +108,11 @@ pub fn try_decode_base16upper(base16: &[u8]) -> Option<Box<[u8]>> {
 #[must_use = "the decoded size should be used"]
 #[inline]
 pub fn decoded_length_base16(src: &[u8]) -> Option<usize> {
+    decoded_length(src)
+}
+
+#[inline]
+fn decoded_length(src: &[u8]) -> Option<usize> {
     let len = src.len();
     if len.is_multiple_of(2) {
         Some(len / 2)
@@ -293,21 +298,21 @@ impl<'d> Decoder<'d> {
 #[cfg(test)]
 mod tests {
     use super::super::{ENCODER_LOWER, ENCODER_UPPER, MAX_ASCII, MIN_ASCII};
-    use super::*;
+    use super::{BASE16_LOWER, BASE16_MIXED, BASE16_UPPER, Decoder, decoded_length};
 
     #[cfg(feature = "alloc")]
-    type Decode = fn(&[u8]) -> Option<Box<[u8]>>;
+    use alloc::vec::Vec;
 
     #[cfg(feature = "alloc")]
     #[test]
     fn mixed_case_decoder_accepts_lowercase_uppercase_and_mixed_input() {
         for encoded in ["deadbeef", "DEADBEEF", "dEaDbEeF"] {
             assert_eq!(
-                try_decode_base16(encoded.as_bytes()).as_deref(),
+                BASE16_MIXED.try_decode_boxed(encoded.as_bytes()).as_deref(),
                 Some([0xde, 0xad, 0xbe, 0xef].as_slice())
             );
             assert_eq!(
-                try_decode_base16_string(encoded).as_deref(),
+                BASE16_MIXED.try_decode_string(encoded).as_deref(),
                 Some([0xde, 0xad, 0xbe, 0xef].as_slice())
             );
         }
@@ -318,28 +323,34 @@ mod tests {
     fn strict_decoders_accept_only_their_selected_case() {
         let expected = Some([0xde, 0xad, 0xbe, 0xef].as_slice());
 
-        assert_eq!(try_decode_base16lower(b"deadbeef").as_deref(), expected);
         assert_eq!(
-            try_decode_base16lower_string("deadbeef").as_deref(),
+            BASE16_LOWER.try_decode_boxed(b"deadbeef").as_deref(),
             expected
         );
-        assert_eq!(try_decode_base16lower(b"DEADBEEF"), None);
-        assert_eq!(try_decode_base16lower(b"dEaDbEeF"), None);
-
-        assert_eq!(try_decode_base16upper(b"DEADBEEF").as_deref(), expected);
         assert_eq!(
-            try_decode_base16upper_string("DEADBEEF").as_deref(),
+            BASE16_LOWER.try_decode_string("deadbeef").as_deref(),
             expected
         );
-        assert_eq!(try_decode_base16upper(b"deadbeef"), None);
-        assert_eq!(try_decode_base16upper(b"dEaDbEeF"), None);
+        assert_eq!(BASE16_LOWER.try_decode_boxed(b"DEADBEEF"), None);
+        assert_eq!(BASE16_LOWER.try_decode_boxed(b"dEaDbEeF"), None);
 
         assert_eq!(
-            try_decode_base16lower(b"0123456789").as_deref(),
+            BASE16_UPPER.try_decode_boxed(b"DEADBEEF").as_deref(),
+            expected
+        );
+        assert_eq!(
+            BASE16_UPPER.try_decode_string("DEADBEEF").as_deref(),
+            expected
+        );
+        assert_eq!(BASE16_UPPER.try_decode_boxed(b"deadbeef"), None);
+        assert_eq!(BASE16_UPPER.try_decode_boxed(b"dEaDbEeF"), None);
+
+        assert_eq!(
+            BASE16_LOWER.try_decode_boxed(b"0123456789").as_deref(),
             Some([0x01, 0x23, 0x45, 0x67, 0x89].as_slice())
         );
         assert_eq!(
-            try_decode_base16upper(b"0123456789").as_deref(),
+            BASE16_UPPER.try_decode_boxed(b"0123456789").as_deref(),
             Some([0x01, 0x23, 0x45, 0x67, 0x89].as_slice())
         );
     }
@@ -347,50 +358,60 @@ mod tests {
     #[cfg(feature = "alloc")]
     #[test]
     fn every_decoder_rejects_malformed_input() {
-        let decoders: &[(&str, Decode)] = &[
-            ("mixed-case", try_decode_base16),
-            ("lowercase", try_decode_base16lower),
-            ("uppercase", try_decode_base16upper),
+        let decoders: &[(&str, &Decoder<'_>)] = &[
+            ("mixed-case", &BASE16_MIXED),
+            ("lowercase", &BASE16_LOWER),
+            ("uppercase", &BASE16_UPPER),
         ];
 
         for &(name, decode) in decoders {
-            assert_eq!(decode(b"0"), None, "{name} accepted an odd-length input");
+            assert_eq!(
+                decode.try_decode_boxed(b"0"),
+                None,
+                "{name} accepted an odd-length input"
+            );
 
             for invalid in [u8::MIN, b'/', b':', b'G', b'g', u8::MAX] {
-                assert_eq!(decode(&[invalid, b'0']), None, "{name}, high nibble");
-                assert_eq!(decode(&[b'0', invalid]), None, "{name}, low nibble");
+                assert_eq!(
+                    decode.try_decode_boxed(&[invalid, b'0']),
+                    None,
+                    "{name}, high nibble"
+                );
+                assert_eq!(
+                    decode.try_decode_boxed(&[b'0', invalid]),
+                    None,
+                    "{name}, low nibble"
+                );
             }
         }
     }
 
     #[test]
     fn decoded_lengths_require_complete_symbol_pairs() {
-        assert_eq!(decoded_length_base16(b""), Some(0));
-        assert_eq!(decoded_length_base16(b"0"), None);
-        assert_eq!(decoded_length_base16(b"00"), Some(1));
-        assert_eq!(decoded_length_base16(b"001"), None);
-        assert_eq!(decoded_length_base16(b"0011"), Some(2));
+        assert_eq!(decoded_length(b""), Some(0));
+        assert_eq!(decoded_length(b"0"), None);
+        assert_eq!(decoded_length(b"00"), Some(1));
+        assert_eq!(decoded_length(b"001"), None);
+        assert_eq!(decoded_length(b"0011"), Some(2));
 
         // Length calculation deliberately does not validate the alphabet.
-        assert_eq!(decoded_length_base16(b"zz"), Some(1));
+        assert_eq!(decoded_length(b"zz"), Some(1));
     }
 
     #[test]
     fn slice_decoders_write_only_the_returned_prefix() {
-        type DecodeFrom = for<'a> fn(&[u8], &'a mut [u8]) -> Option<&'a [u8]>;
-
-        let decoders: &[(&str, DecodeFrom, &[u8])] = &[
-            ("mixed lowercase", try_decode_from_base16, b"deadbeef"),
-            ("mixed uppercase", try_decode_from_base16, b"DEADBEEF"),
-            ("mixed case", try_decode_from_base16, b"dEaDbEeF"),
-            ("strict lowercase", try_decode_from_base16lower, b"deadbeef"),
-            ("strict uppercase", try_decode_from_base16upper, b"DEADBEEF"),
+        let decoders: &[(&str, &Decoder<'_>, &[u8])] = &[
+            ("mixed lowercase", &BASE16_MIXED, b"deadbeef"),
+            ("mixed uppercase", &BASE16_MIXED, b"DEADBEEF"),
+            ("mixed case", &BASE16_MIXED, b"dEaDbEeF"),
+            ("strict lowercase", &BASE16_LOWER, b"deadbeef"),
+            ("strict uppercase", &BASE16_UPPER, b"DEADBEEF"),
         ];
 
         for &(name, decode, encoded) in decoders {
             let mut dst = [b'!'; 6];
             assert_eq!(
-                decode(encoded, &mut dst),
+                decode.try_decode_into(encoded, &mut dst),
                 Some([0xde, 0xad, 0xbe, 0xef].as_slice()),
                 "{name}",
             );
@@ -398,7 +419,7 @@ mod tests {
         }
 
         let mut untouched = [b'x'; 1];
-        let decoded = try_decode_from_base16(b"", &mut untouched).unwrap();
+        let decoded = BASE16_MIXED.try_decode_into(b"", &mut untouched).unwrap();
         assert!(decoded.is_empty());
         assert_eq!(untouched, [b'x']);
     }
@@ -407,13 +428,13 @@ mod tests {
     fn slice_decoders_reject_bad_alignment_alphabet_case_and_capacity() {
         let mut dst = [0; 4];
 
-        assert_eq!(try_decode_from_base16(b"0", &mut dst), None);
-        assert_eq!(try_decode_from_base16(b"gg", &mut dst), None);
-        assert_eq!(try_decode_from_base16lower(b"FF", &mut dst), None);
-        assert_eq!(try_decode_from_base16upper(b"ff", &mut dst), None);
+        assert_eq!(BASE16_MIXED.try_decode_into(b"0", &mut dst), None);
+        assert_eq!(BASE16_MIXED.try_decode_into(b"gg", &mut dst), None);
+        assert_eq!(BASE16_LOWER.try_decode_into(b"FF", &mut dst), None);
+        assert_eq!(BASE16_UPPER.try_decode_into(b"ff", &mut dst), None);
 
         let mut short = [0; 3];
-        assert_eq!(try_decode_from_base16(b"deadbeef", &mut short), None);
+        assert_eq!(BASE16_MIXED.try_decode_into(b"deadbeef", &mut short), None);
     }
 
     #[test]
@@ -424,25 +445,29 @@ mod tests {
         }
 
         let mut lower = [0; 512];
-        let lower = super::super::try_encode_into_base16(&input, &mut lower).unwrap();
+        let lower = super::super::enc::BASE16_LOWER
+            .encode_into(&input, &mut lower)
+            .unwrap();
         let mut decoded = [0; 256];
         assert_eq!(
-            try_decode_from_base16(lower, &mut decoded),
+            BASE16_MIXED.try_decode_into(lower, &mut decoded),
             Some(input.as_slice()),
         );
         assert_eq!(
-            try_decode_from_base16lower(lower, &mut decoded),
+            BASE16_LOWER.try_decode_into(lower, &mut decoded),
             Some(input.as_slice()),
         );
 
         let mut upper = [0; 512];
-        let upper = super::super::try_encode_into_base16upper(&input, &mut upper).unwrap();
+        let upper = super::super::enc::BASE16_UPPER
+            .encode_into(&input, &mut upper)
+            .unwrap();
         assert_eq!(
-            try_decode_from_base16(upper, &mut decoded),
+            BASE16_MIXED.try_decode_into(upper, &mut decoded),
             Some(input.as_slice()),
         );
         assert_eq!(
-            try_decode_from_base16upper(upper, &mut decoded),
+            BASE16_UPPER.try_decode_into(upper, &mut decoded),
             Some(input.as_slice()),
         );
     }
@@ -498,17 +523,23 @@ mod tests {
                 .map(|i| (i.wrapping_mul(73).wrapping_add(len * 19)) as u8)
                 .collect();
 
-            let lower = super::super::encode_base16(&input);
-            assert_eq!(try_decode_base16(&lower).as_deref(), Some(input.as_slice()));
+            let lower = super::super::enc::BASE16_LOWER.encode_boxed(&input);
             assert_eq!(
-                try_decode_base16lower(&lower).as_deref(),
+                BASE16_MIXED.try_decode_boxed(&lower).as_deref(),
+                Some(input.as_slice())
+            );
+            assert_eq!(
+                BASE16_LOWER.try_decode_boxed(&lower).as_deref(),
                 Some(input.as_slice())
             );
 
-            let upper = super::super::encode_base16upper(&input);
-            assert_eq!(try_decode_base16(&upper).as_deref(), Some(input.as_slice()));
+            let upper = super::super::enc::BASE16_UPPER.encode_boxed(&input);
             assert_eq!(
-                try_decode_base16upper(&upper).as_deref(),
+                BASE16_MIXED.try_decode_boxed(&upper).as_deref(),
+                Some(input.as_slice())
+            );
+            assert_eq!(
+                BASE16_UPPER.try_decode_boxed(&upper).as_deref(),
                 Some(input.as_slice())
             );
         }
