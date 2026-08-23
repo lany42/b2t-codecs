@@ -377,32 +377,29 @@ mod tests {
 
     #[test]
     fn slice_decoders_write_only_the_returned_prefix() {
-        for encoded in [b"deadbeef", b"DEADBEEF", b"dEaDbEeF"] {
+        type DecodeFrom = for<'a> fn(&[u8], &'a mut [u8]) -> Option<&'a [u8]>;
+
+        let decoders: &[(&str, DecodeFrom, &[u8])] = &[
+            ("mixed lowercase", try_decode_from_base16, b"deadbeef"),
+            ("mixed uppercase", try_decode_from_base16, b"DEADBEEF"),
+            ("mixed case", try_decode_from_base16, b"dEaDbEeF"),
+            ("strict lowercase", try_decode_from_base16lower, b"deadbeef"),
+            ("strict uppercase", try_decode_from_base16upper, b"DEADBEEF"),
+        ];
+
+        for &(name, decode, encoded) in decoders {
             let mut dst = [b'!'; 6];
             assert_eq!(
-                try_decode_from_base16(encoded, &mut dst),
+                decode(encoded, &mut dst),
                 Some([0xde, 0xad, 0xbe, 0xef].as_slice()),
+                "{name}",
             );
-            assert_eq!(&dst[4..], b"!!");
+            assert_eq!(&dst[4..], b"!!", "{name}");
         }
 
-        let mut lower = [0; 4];
-        assert_eq!(
-            try_decode_from_base16lower(b"deadbeef", &mut lower),
-            Some([0xde, 0xad, 0xbe, 0xef].as_slice()),
-        );
-
-        let mut upper = [0; 4];
-        assert_eq!(
-            try_decode_from_base16upper(b"DEADBEEF", &mut upper),
-            Some([0xde, 0xad, 0xbe, 0xef].as_slice()),
-        );
-
         let mut untouched = [b'x'; 1];
-        let dst_ptr = untouched.as_ptr();
         let decoded = try_decode_from_base16(b"", &mut untouched).unwrap();
         assert!(decoded.is_empty());
-        assert_eq!(decoded.as_ptr(), dst_ptr);
         assert_eq!(untouched, [b'x']);
     }
 

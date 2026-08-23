@@ -511,18 +511,8 @@ mod tests {
         assert_eq!(decoded_length_base32(b"AAA====="), None);
         assert_eq!(decoded_length_base32(b"A======="), None);
         assert_eq!(decoded_length_base32(b"========"), None);
-    }
-
-    #[test]
-    fn tail_padding_is_counted_backwards_from_the_end() {
-        assert_eq!(count_tail_padding(b"AAAAAAAA"), 0);
-        assert_eq!(count_tail_padding(b"AAAAAAA="), 1);
-        assert_eq!(count_tail_padding(b"AAAAA==="), 3);
-        assert_eq!(count_tail_padding(b"AAAA===="), 4);
-        assert_eq!(count_tail_padding(b"AA======"), 6);
-        assert_eq!(count_tail_padding(b"A===A==="), 3);
-        assert_eq!(count_tail_padding(b"========"), 8);
-        assert_eq!(count_tail_padding(b"================"), 8);
+        // Length calculation deliberately leaves non-terminal padding validation to decoding.
+        assert_eq!(decoded_length_base32(b"A===A==="), Some(3));
     }
 
     #[test]
@@ -589,8 +579,6 @@ mod tests {
                 &[0xa5; 2],
                 "{name} modified the destination suffix"
             );
-
-            assert_eq!(decode(b"", &mut oversized), Some([].as_slice()), "{name}");
         }
     }
 

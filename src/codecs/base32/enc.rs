@@ -285,6 +285,7 @@ mod tests {
     type EncodeBytes = fn(&[u8]) -> Box<[u8]>;
     #[cfg(feature = "alloc")]
     type EncodeString = fn(&[u8]) -> String;
+    type EncodeInto = for<'a> fn(&[u8], &'a mut [u8]) -> Option<&'a [u8]>;
 
     #[test]
     fn rfc_4648_base32_test_vectors_pin_encoding() {
@@ -332,38 +333,33 @@ mod tests {
     }
 
     #[test]
-    fn slice_encoders_write_only_the_returned_prefix() {
-        let mut base32 = [b'!'; 10];
-        assert_eq!(
-            try_encode_into_base32(b"foo", &mut base32),
-            Some(b"MZXW6===".as_slice()),
-        );
-        assert_eq!(&base32[8..], b"!!");
+    fn slice_encoders_preserve_destination_bounds() {
+        let codecs: [(&str, EncodeInto, &[u8], u8); 2] = [
+            ("Base32", try_encode_into_base32, b"MZXW6===", b'!'),
+            ("Base32Hex", try_encode_into_base32hex, b"CPNMU===", b'?'),
+        ];
 
-        let mut base32hex = [b'?'; 10];
-        assert_eq!(
-            try_encode_into_base32hex(b"foo", &mut base32hex),
-            Some(b"CPNMU===".as_slice()),
-        );
-        assert_eq!(&base32hex[8..], b"??");
+        for (name, encode, expected, sentinel) in codecs {
+            let mut oversized = [sentinel; 10];
+            assert_eq!(encode(b"foo", &mut oversized), Some(expected), "{name}");
+            assert_eq!(
+                &oversized[expected.len()..],
+                &[sentinel; 2],
+                "{name} modified the destination suffix"
+            );
 
-        let mut untouched = [b'x'; 1];
-        let dst_ptr = untouched.as_ptr();
-        let encoded = try_encode_into_base32(b"", &mut untouched).unwrap();
-        assert!(encoded.is_empty());
-        assert_eq!(encoded.as_ptr(), dst_ptr);
-        assert_eq!(untouched, [b'x']);
-    }
+            let mut short = [sentinel; 7];
+            assert_eq!(encode(b"foo", &mut short), None, "{name}");
+            assert_eq!(short, [sentinel; 7], "{name} modified a short destination");
 
-    #[test]
-    fn slice_encoders_return_none_for_a_short_destination() {
-        let mut base32 = [b'!'; 7];
-        assert_eq!(try_encode_into_base32(b"foo", &mut base32), None);
-        assert_eq!(base32, [b'!'; 7]);
-
-        let mut base32hex = [b'?'; 7];
-        assert_eq!(try_encode_into_base32hex(b"foo", &mut base32hex), None);
-        assert_eq!(base32hex, [b'?'; 7]);
+            let mut empty = [sentinel; 1];
+            assert_eq!(encode(b"", &mut empty), Some([].as_slice()), "{name}");
+            assert_eq!(
+                empty,
+                [sentinel],
+                "{name} modified the destination for empty input"
+            );
+        }
     }
 
     #[test]

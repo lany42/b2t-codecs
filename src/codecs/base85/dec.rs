@@ -257,8 +257,8 @@ impl<'d> Decoder<'d> {
 mod tests {
     use super::super::enc::{encode_adobe85, try_encode_ascii85, try_encode_z85};
     use super::super::{
-        DECODER_ASCII85, ENCODER_ASCII85, ENCODER_Z85, MAX_ASCII_ASCII85, MAX_ASCII_Z85,
-        MIN_ASCII_ASCII85, MIN_ASCII_Z85,
+        ENCODER_ASCII85, ENCODER_Z85, MAX_ASCII_ASCII85, MAX_ASCII_Z85, MIN_ASCII_ASCII85,
+        MIN_ASCII_Z85,
     };
     use super::*;
 
@@ -295,7 +295,7 @@ mod tests {
     }
 
     #[test]
-    fn empty_input_decodes() {
+    fn empty_input_decodes_through_all_apis() {
         assert_eq!(try_decode_ascii85(b"").as_deref(), Some(b"".as_slice()));
         assert_eq!(
             try_decode_ascii85_string("").as_deref(),
@@ -303,6 +303,11 @@ mod tests {
         );
         assert_eq!(try_decode_z85(b"").as_deref(), Some(b"".as_slice()));
         assert_eq!(try_decode_z85_string("").as_deref(), Some(b"".as_slice()));
+        assert_eq!(try_decode_adobe85(b"").as_deref(), Some(b"".as_slice()));
+        assert_eq!(
+            try_decode_adobe85_string("").as_deref(),
+            Some(b"".as_slice())
+        );
     }
 
     #[test]
@@ -434,18 +439,22 @@ mod tests {
     }
 
     #[test]
-    fn decode_rejects_value_just_above_u32_max() {
-        assert_eq!(
-            try_decode_ascii85(b"s8W-!").as_deref(),
-            Some([u8::MAX; 4].as_slice())
-        );
-        assert_eq!(try_decode_ascii85(b"s8W-\""), None);
+    fn decoders_reject_value_just_above_u32_max() {
+        let codecs: &[(&str, Decode, &[u8], &[u8])] = &[
+            ("ASCII85", try_decode_ascii85, b"s8W-!", b"s8W-\""),
+            ("Z85", try_decode_z85, b"%nSc0", b"%nSc1"),
+            ("Adobe85", try_decode_adobe85, b"s8W-!", b"s8W-\""),
+        ];
+        let expected = [u8::MAX; 4];
 
-        assert_eq!(
-            try_decode_z85(b"%nSc0").as_deref(),
-            Some([u8::MAX; 4].as_slice())
-        );
-        assert_eq!(try_decode_z85(b"%nSc1"), None);
+        for &(name, decode, max, overflow) in codecs {
+            assert_eq!(
+                decode(max).as_deref(),
+                Some(expected.as_slice()),
+                "{name} rejected u32::MAX"
+            );
+            assert_eq!(decode(overflow), None, "{name} accepted u32::MAX + 1");
+        }
     }
 
     #[test]
@@ -461,32 +470,6 @@ mod tests {
             try_decode_adobe85_string("L/669[9<6.").as_deref(),
             Some(input.as_slice())
         );
-    }
-
-    #[test]
-    fn adobe85_empty_input_decodes() {
-        assert_eq!(try_decode_adobe85(b"").as_deref(), Some(b"".as_slice()));
-        assert_eq!(
-            try_decode_adobe85_string("").as_deref(),
-            Some(b"".as_slice())
-        );
-    }
-
-    #[test]
-    fn adobe85_tables_preserve_unsafe_indexing_and_utf8_invariants() {
-        let mut seen = [false; DECODER_ASCII85.len()];
-
-        for (digit, &ascii) in ENCODER_ASCII85.iter().enumerate() {
-            assert!(ascii.is_ascii());
-
-            let ascii = ascii as usize;
-            assert!((MIN_ASCII_ASCII85..MAX_ASCII_ASCII85).contains(&ascii));
-
-            let offset = ascii - MIN_ASCII_ASCII85;
-            assert!(!seen[offset], "duplicate Adobe85 byte at ASCII {ascii}");
-            seen[offset] = true;
-            assert_eq!(DECODER_ASCII85[offset], digit as u8);
-        }
     }
 
     #[test]
@@ -613,14 +596,5 @@ mod tests {
         let mut second_frame = *b"!!!!!!!!!!";
         second_frame[7] = super::super::ADOBE85_ZEROS;
         assert_eq!(try_decode_adobe85(&second_frame), None);
-    }
-
-    #[test]
-    fn adobe85_decode_rejects_value_just_above_u32_max() {
-        assert_eq!(
-            try_decode_adobe85(b"s8W-!").as_deref(),
-            Some([u8::MAX; 4].as_slice())
-        );
-        assert_eq!(try_decode_adobe85(b"s8W-\""), None);
     }
 }

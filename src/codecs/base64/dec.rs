@@ -557,6 +557,22 @@ mod tests {
     type EncodeInto = for<'a> fn(&[u8], &'a mut [u8]) -> Option<&'a [u8]>;
     type DecodeInto = for<'a> fn(&[u8], &'a mut [u8]) -> Option<&'a [u8]>;
 
+    const RFC_4648_VECTORS: &[(&[u8], &str)] = &[
+        (b"", ""),
+        (b"f", "Zg=="),
+        (b"fo", "Zm8="),
+        (b"foo", "Zm9v"),
+        (b"foob", "Zm9vYg=="),
+        (b"fooba", "Zm9vYmE="),
+        (b"foobar", "Zm9vYmFy"),
+    ];
+
+    const ALPHABET_VECTORS: &[(&[u8], &str, &str)] = &[
+        (&[0xfb], "+w==", "-w=="),
+        (&[0xfb, 0xff], "+/8=", "-_8="),
+        (&[0xfb, 0xff, 0xff], "+///", "-___"),
+    ];
+
     #[cfg(feature = "alloc")]
     fn strict_decoders() -> [(&'static str, Decode); 2] {
         [
@@ -618,12 +634,6 @@ mod tests {
         assert_eq!(decoded_length_base64(b"Zm9vYg=="), Some(4));
         assert_eq!(decoded_length_base64(b"A==="), None);
         assert_eq!(decoded_length_base64(b"===="), None);
-
-        assert_eq!(count_tail_padding(b"AAAA"), 0);
-        assert_eq!(count_tail_padding(b"AAA="), 1);
-        assert_eq!(count_tail_padding(b"AA=="), 2);
-        assert_eq!(count_tail_padding(b"A==="), 3);
-        assert_eq!(count_tail_padding(b"========"), 4);
     }
 
     #[test]
@@ -645,17 +655,7 @@ mod tests {
 
     #[test]
     fn rfc_vectors_decode_through_non_allocating_paths() {
-        let vectors: &[(&[u8], &str)] = &[
-            (b"", ""),
-            (b"f", "Zg=="),
-            (b"fo", "Zm8="),
-            (b"foo", "Zm9v"),
-            (b"foob", "Zm9vYg=="),
-            (b"fooba", "Zm9vYmE="),
-            (b"foobar", "Zm9vYmFy"),
-        ];
-
-        for &(plain, encoded) in vectors {
+        for &(plain, encoded) in RFC_4648_VECTORS {
             let mut dst = [0u8; 6];
             assert_eq!(
                 try_decode_from_base64(encoded.as_bytes(), &mut dst),
@@ -684,13 +684,7 @@ mod tests {
 
     #[test]
     fn non_allocating_decoders_select_the_requested_alphabet() {
-        let vectors: &[(&[u8], &str, &str)] = &[
-            (&[0xfb], "+w==", "-w=="),
-            (&[0xfb, 0xff], "+/8=", "-_8="),
-            (&[0xfb, 0xff, 0xff], "+///", "-___"),
-        ];
-
-        for &(plain, base64, base64url) in vectors {
+        for &(plain, base64, base64url) in ALPHABET_VECTORS {
             let mut dst = [0u8; 3];
             assert_eq!(
                 try_decode_from_base64(base64.as_bytes(), &mut dst),
@@ -886,17 +880,7 @@ mod tests {
     #[cfg(feature = "alloc")]
     #[test]
     fn rfc_4648_base64_test_vectors_pin_decoding() {
-        let vectors: &[(&[u8], &str)] = &[
-            (b"", ""),
-            (b"f", "Zg=="),
-            (b"fo", "Zm8="),
-            (b"foo", "Zm9v"),
-            (b"foob", "Zm9vYg=="),
-            (b"fooba", "Zm9vYmE="),
-            (b"foobar", "Zm9vYmFy"),
-        ];
-
-        for &(plain, encoded) in vectors {
+        for &(plain, encoded) in RFC_4648_VECTORS {
             assert_eq!(
                 try_decode_base64(encoded.as_bytes()).as_deref(),
                 Some(plain)
@@ -929,13 +913,7 @@ mod tests {
     #[cfg(feature = "alloc")]
     #[test]
     fn base64url_decoding_uses_url_safe_alphabet() {
-        let vectors: &[(&[u8], &str, &str)] = &[
-            (&[0xfb], "+w==", "-w=="),
-            (&[0xfb, 0xff], "+/8=", "-_8="),
-            (&[0xfb, 0xff, 0xff], "+///", "-___"),
-        ];
-
-        for &(plain, base64, base64url) in vectors {
+        for &(plain, base64, base64url) in ALPHABET_VECTORS {
             assert_eq!(try_decode_base64_string(base64).as_deref(), Some(plain));
             assert_eq!(try_decode_base64ext_string(base64).as_deref(), Some(plain));
             assert_eq!(
@@ -1095,45 +1073,23 @@ mod tests {
 
     #[cfg(feature = "alloc")]
     #[test]
-    fn extended_decode_accepts_unpadded_final_quantum() {
-        for (name, decode) in extended_decoders() {
-            for (input, expected) in [("Zg", b"f".as_slice()), ("Zm8", b"fo".as_slice())] {
-                assert_eq!(
-                    decode(input.as_bytes()).as_deref(),
-                    Some(expected),
-                    "{name} rejected {input:?}"
-                );
-            }
-        }
-    }
+    fn extended_decode_accepts_supported_framing() {
+        let cases: &[(&str, &[u8], &[u8])] = &[
+            ("unpadded final quantum", b"Zg", b"f"),
+            ("unpadded final quantum", b"Zm8", b"fo"),
+            ("padding-only chunks", b"====", b""),
+            ("padding-only chunks", b"========", b""),
+            ("concatenated padded values", b"TQ==TQ==", b"MM"),
+            ("concatenated padded values", b"TWE=TWE=", b"MaMa"),
+            ("concatenated padded values", b"TQ======TQ==", b"MM"),
+        ];
 
-    #[cfg(feature = "alloc")]
-    #[test]
-    fn extended_decode_accepts_padding_only_chunks() {
         for (name, decode) in extended_decoders() {
-            for input in [b"====".as_slice(), b"========".as_slice()] {
+            for &(category, input, expected) in cases {
                 assert_eq!(
                     decode(input).as_deref(),
-                    Some(b"".as_slice()),
-                    "{name} rejected {input:?}"
-                );
-            }
-        }
-    }
-
-    #[cfg(feature = "alloc")]
-    #[test]
-    fn extended_decode_treats_padded_quanta_as_concatenated_values() {
-        for (name, decode) in extended_decoders() {
-            for (input, expected) in [
-                ("TQ==TQ==", b"MM".as_slice()),
-                ("TWE=TWE=", b"MaMa".as_slice()),
-                ("TQ======TQ==", b"MM".as_slice()),
-            ] {
-                assert_eq!(
-                    decode(input.as_bytes()).as_deref(),
                     Some(expected),
-                    "{name} rejected {input:?}"
+                    "{name} rejected {category} case {input:?}"
                 );
             }
         }

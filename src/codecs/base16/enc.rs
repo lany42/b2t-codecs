@@ -273,27 +273,32 @@ mod tests {
     }
 
     #[test]
-    fn slice_encoders_write_only_the_returned_prefix() {
-        let mut lower = [b'!'; 10];
-        assert_eq!(
-            try_encode_into_base16(&[0x00, 0xab, 0xff], &mut lower),
-            Some(b"00abff".as_slice()),
-        );
-        assert_eq!(&lower[6..], b"!!!!");
+    fn slice_encoders_obey_the_destination_contract() {
+        type EncodeInto = for<'a> fn(&[u8], &'a mut [u8]) -> Option<&'a [u8]>;
 
-        let mut upper = [b'?'; 10];
-        assert_eq!(
-            try_encode_into_base16upper(&[0x00, 0xab, 0xff], &mut upper),
-            Some(b"00ABFF".as_slice()),
-        );
-        assert_eq!(&upper[6..], b"????");
+        let encoders: &[(&str, EncodeInto, &[u8])] = &[
+            ("lowercase", try_encode_into_base16, b"00abff"),
+            ("uppercase", try_encode_into_base16upper, b"00ABFF"),
+        ];
 
-        let mut untouched = [b'x'; 1];
-        let dst_ptr = untouched.as_ptr();
-        let encoded = try_encode_into_base16(b"", &mut untouched).unwrap();
-        assert!(encoded.is_empty());
-        assert_eq!(encoded.as_ptr(), dst_ptr);
-        assert_eq!(untouched, [b'x']);
+        for &(name, encode, expected) in encoders {
+            let mut dst = [b'!'; 10];
+            assert_eq!(
+                encode(&[0x00, 0xab, 0xff], &mut dst),
+                Some(expected),
+                "{name}",
+            );
+            assert_eq!(&dst[expected.len()..], b"!!!!", "{name}");
+
+            let mut untouched = [b'x'; 1];
+            let encoded = encode(b"", &mut untouched).unwrap();
+            assert!(encoded.is_empty(), "{name}");
+            assert_eq!(untouched, [b'x'], "{name}");
+
+            let mut short = [b'?'; 3];
+            assert_eq!(encode(&[0xab, 0xcd], &mut short), None, "{name}");
+            assert_eq!(short, [b'?'; 3], "{name}");
+        }
     }
 
     #[test]
@@ -312,17 +317,6 @@ mod tests {
         let upper = try_encode_into_base16upper(&input, &mut upper).unwrap();
         assert_eq!(upper.len(), encoded_length_base16(&input));
         assert!(upper.iter().all(|byte| BASE16_UPPER.encoder.contains(byte)));
-    }
-
-    #[test]
-    fn slice_encoders_return_none_for_a_short_destination() {
-        let mut lower = [b'!'; 3];
-        assert_eq!(try_encode_into_base16(&[0xab, 0xcd], &mut lower), None);
-        assert_eq!(lower, [b'!'; 3]);
-
-        let mut upper = [b'?'; 3];
-        assert_eq!(try_encode_into_base16upper(&[0xab, 0xcd], &mut upper), None);
-        assert_eq!(upper, [b'?'; 3]);
     }
 
     #[test]

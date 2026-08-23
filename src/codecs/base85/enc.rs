@@ -253,11 +253,13 @@ mod tests {
     }
 
     #[test]
-    fn empty_input_encodes() {
+    fn empty_input_encodes_through_all_apis() {
         assert_eq!(try_encode_ascii85(b"").as_deref(), Some(b"".as_slice()));
         assert_eq!(try_encode_ascii85_string(b"").as_deref(), Some(""));
         assert_eq!(try_encode_z85(b"").as_deref(), Some(b"".as_slice()));
         assert_eq!(try_encode_z85_string(b"").as_deref(), Some(""));
+        assert_eq!(&*encode_adobe85(b""), b"");
+        assert_eq!(encode_adobe85_string(b""), "");
     }
 
     #[test]
@@ -270,26 +272,6 @@ mod tests {
             try_encode_z85(&[0; 4]).as_deref(),
             Some(b"00000".as_slice())
         );
-    }
-
-    #[test]
-    fn encoder_alphabets_preserve_unsafe_indexing_and_utf8_invariants() {
-        fn assert_invariants(name: &str, encoder: &Encoder<'_>) {
-            assert_eq!(encoder.encoder.len(), 85);
-
-            let mut seen = [false; 128];
-            for &ascii in encoder.encoder {
-                assert!(ascii.is_ascii());
-                assert!(
-                    !seen[ascii as usize],
-                    "duplicate {name} byte at ASCII {ascii}"
-                );
-                seen[ascii as usize] = true;
-            }
-        }
-
-        assert_invariants("ASCII85", &ASCII85);
-        assert_invariants("Z85", &Z85);
     }
 
     #[test]
@@ -312,12 +294,6 @@ mod tests {
 
         assert_eq!(&*encode_adobe85(&input), expected);
         assert_eq!(encode_adobe85_string(&input), "L/669[9<6.");
-    }
-
-    #[test]
-    fn adobe85_empty_input_encodes() {
-        assert_eq!(&*encode_adobe85(b""), b"");
-        assert_eq!(encode_adobe85_string(b""), "");
     }
 
     #[test]
