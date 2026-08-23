@@ -19,7 +19,6 @@
 //! ```
 pub mod base16;
 pub mod base32;
-#[cfg(feature = "alloc")]
 pub mod base64;
 #[cfg(feature = "alloc")]
 pub mod base85;

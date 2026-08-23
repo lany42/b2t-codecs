@@ -13,20 +13,22 @@ b2t-codecs = { version = "2", default-features = false }
 ## Quick Start
 
 ```rust
-use b2t_codecs::{encode_base64_string, try_decode_base64_string};
+use b2t_codecs::{try_decode_from_base64, try_encode_into_base64};
 
-let encoded = encode_base64_string(b"Rust is great!");
-assert_eq!(encoded, "UnVzdCBpcyBncmVhdCE=");
+let mut encoded = [0; 20];
+let mut decoded = [0; 14];
+let encoded = try_encode_into_base64(b"Rust is great!", &mut encoded).unwrap();
+let decoded = try_decode_from_base64(encoded, &mut decoded);
 
-let decoded = &*try_decode_base64_string(&encoded).unwrap();
-assert_eq!(decoded, b"Rust is great!");
+assert_eq!(encoded, b"UnVzdCBpcyBncmVhdCE=");
+assert_eq!(decoded, Some(b"Rust is great!".as_slice()));
 ```
 
 ## Todo
 
 - [x] No-alloc API for Base16, v2.0
 - [x] No-alloc API for Base32, v2.1
-- [ ] No-alloc API for Base64, v2.2
+- [x] No-alloc API for Base64, v2.2
 - [ ] No-alloc API for Base85, v2.3
 
 ## Codecs

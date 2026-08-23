@@ -7,13 +7,15 @@
 //! tails, concatenated padded values, and padding-only quanta.
 //!
 //! ```rust
-//! use b2t_codecs::base64::{encode_base64url_string, try_decode_base64url_string};
+//! use b2t_codecs::base64::{try_decode_from_base64url, try_encode_into_base64url};
 //!
-//! let encoded = encode_base64url_string(b"Hello,World!");
-//! assert_eq!(encoded, "SGVsbG8sV29ybGQh");
+//! let mut encoded = [0; 16];
+//! let mut decoded = [0; 12];
+//! let encoded = try_encode_into_base64url(b"Hello,World!", &mut encoded).unwrap();
+//! let decoded = try_decode_from_base64url(encoded, &mut decoded);
 //!
-//! let decoded = &*try_decode_base64url_string(&encoded).unwrap();
-//! assert_eq!(decoded, b"Hello,World!");
+//! assert_eq!(encoded, b"SGVsbG8sV29ybGQh");
+//! assert_eq!(decoded, Some(b"Hello,World!".as_slice()));
 //! ```
 // BASE64 CODEC
 // Canonical RFC 4648 Base64 and Base64URL codecs. Strict decoders reject
@@ -25,11 +27,18 @@ mod dec;
 mod enc;
 
 pub use dec::{
+    decoded_length_base64, decoded_length_base64ext, try_decode_from_base64,
+    try_decode_from_base64ext, try_decode_from_base64url, try_decode_from_base64urlext,
+};
+#[cfg(feature = "alloc")]
+pub use dec::{
     try_decode_base64, try_decode_base64_string, try_decode_base64ext, try_decode_base64ext_string,
     try_decode_base64url, try_decode_base64url_string, try_decode_base64urlext,
     try_decode_base64urlext_string,
 };
+#[cfg(feature = "alloc")]
 pub use enc::{encode_base64, encode_base64_string, encode_base64url, encode_base64url_string};
+pub use enc::{encoded_length_base64, try_encode_into_base64, try_encode_into_base64url};
 
 #[cfg(feature = "alloc")]
 use alloc::{boxed::Box, string::String};
@@ -78,6 +87,7 @@ const BASE64_PAD: u8 = b'=';
 ///
 /// This function does not validate the input and leaves non-trailing bytes
 /// unchanged.
+#[cfg(feature = "alloc")]
 #[must_use = "the unpadded value should be used"]
 #[inline]
 pub fn trim_base64_end_padding(bytes: Box<[u8]>) -> Box<[u8]> {
@@ -103,13 +113,30 @@ mod sealed {
 /// primitive integer types. Values are encoded from their big-endian bytes at
 /// their full type width.
 pub trait Base64: sealed::Sealed + Copy {
+    /// The fixed width of this integer type in decoded bytes.
+    ///
+    /// Its full-width padded Base64 representation contains exactly
+    /// `Self::SIZE.div_ceil(3) * 4` ASCII bytes.
+    const SIZE: usize;
+
     /// Returns the padded Base64 encoding of this value.
+    #[cfg(feature = "alloc")]
     #[must_use = "the encoded value should be used"]
     fn as_base64_string(&self) -> String;
 
     /// Returns the padded Base64 ASCII bytes for this value.
+    #[cfg(feature = "alloc")]
     #[must_use = "the encoded value should be used"]
     fn as_base64(&self) -> Box<[u8]>;
+
+    /// Encodes this value as full-width, padded Base64 into `dst`.
+    ///
+    /// Returns the initialized prefix of `dst`, or [`None`] if `dst` is shorter
+    /// than `Self::SIZE.div_ceil(3) * 4`. A short destination is left unchanged.
+    /// Any bytes after the encoded prefix are also left unchanged. This method
+    /// does not allocate.
+    #[must_use = "the encoding result should be handled"]
+    fn try_as_base64_into<'a>(&self, dst: &'a mut [u8]) -> Option<&'a [u8]>;
 
     /// Decodes a canonical Base64 string into a value of exactly this type's width.
     ///
@@ -132,13 +159,30 @@ pub trait Base64: sealed::Sealed + Copy {
 /// primitive integer types. Values are encoded from their big-endian bytes at
 /// their full type width.
 pub trait Base64Url: sealed::Sealed + Copy {
+    /// The fixed width of this integer type in decoded bytes.
+    ///
+    /// Its full-width padded Base64URL representation contains exactly
+    /// `Self::SIZE.div_ceil(3) * 4` ASCII bytes.
+    const SIZE: usize;
+
     /// Returns the padded Base64URL encoding of this value.
+    #[cfg(feature = "alloc")]
     #[must_use = "the encoded value should be used"]
     fn as_base64url_string(&self) -> String;
 
     /// Returns the padded Base64URL ASCII bytes for this value.
+    #[cfg(feature = "alloc")]
     #[must_use = "the encoded value should be used"]
     fn as_base64url(&self) -> Box<[u8]>;
+
+    /// Encodes this value as full-width, padded Base64URL into `dst`.
+    ///
+    /// Returns the initialized prefix of `dst`, or [`None`] if `dst` is shorter
+    /// than `Self::SIZE.div_ceil(3) * 4`. A short destination is left unchanged.
+    /// Any bytes after the encoded prefix are also left unchanged. This method
+    /// does not allocate.
+    #[must_use = "the encoding result should be handled"]
+    fn try_as_base64url_into<'a>(&self, dst: &'a mut [u8]) -> Option<&'a [u8]>;
 
     /// Decodes a canonical Base64URL string into a value of this type's width.
     ///
@@ -161,14 +205,23 @@ macro_rules! impl_base64 {
             impl sealed::Sealed for $ty {}
 
             impl Base64 for $ty {
+                const SIZE: usize = core::mem::size_of::<$ty>();
+
+                #[cfg(feature = "alloc")]
                 #[inline]
                 fn as_base64_string(&self) -> String {
                     encode_base64_string(&self.to_be_bytes())
                 }
 
+                #[cfg(feature = "alloc")]
                 #[inline]
                 fn as_base64(&self) -> Box<[u8]> {
                     encode_base64(&self.to_be_bytes())
+                }
+
+                #[inline]
+                fn try_as_base64_into<'a>(&self, dst: &'a mut [u8]) -> Option<&'a [u8]> {
+                    try_encode_into_base64(&self.to_be_bytes(), dst)
                 }
 
                 #[inline]
@@ -178,9 +231,13 @@ macro_rules! impl_base64 {
 
                 #[inline]
                 fn try_from_base64(base64: &[u8]) -> Option<Self> {
-                    if let Some(bytes) = try_decode_base64(base64) {
-                        const SIZE: usize = core::mem::size_of::<$ty>();
-                        if bytes.len() != SIZE {
+                    if decoded_length_base64(base64)? != <Self as Base64>::SIZE {
+                        return None;
+                    }
+
+                    let mut dst = [0u8; <Self as Base64>::SIZE];
+                    if let Some(bytes) = try_decode_from_base64(base64, &mut dst) {
+                        if bytes.len() != <Self as Base64>::SIZE {
                             return None;
                         }
 
@@ -193,14 +250,23 @@ macro_rules! impl_base64 {
             }
 
             impl Base64Url for $ty {
+                const SIZE: usize = core::mem::size_of::<$ty>();
+
+                #[cfg(feature = "alloc")]
                 #[inline]
                 fn as_base64url_string(&self) -> String {
                     encode_base64url_string(&self.to_be_bytes())
                 }
 
+                #[cfg(feature = "alloc")]
                 #[inline]
                 fn as_base64url(&self) -> Box<[u8]> {
                     encode_base64url(&self.to_be_bytes())
+                }
+
+                #[inline]
+                fn try_as_base64url_into<'a>(&self, dst: &'a mut [u8]) -> Option<&'a [u8]> {
+                    try_encode_into_base64url(&self.to_be_bytes(), dst)
                 }
 
                 #[inline]
@@ -210,9 +276,13 @@ macro_rules! impl_base64 {
 
                 #[inline]
                 fn try_from_base64url(base64: &[u8]) -> Option<Self> {
-                    if let Some(bytes) = try_decode_base64url(base64) {
-                        const SIZE: usize = core::mem::size_of::<$ty>();
-                        if bytes.len() != SIZE {
+                    if decoded_length_base64(base64)? != <Self as Base64Url>::SIZE {
+                        return None;
+                    }
+
+                    let mut dst = [0u8; <Self as Base64Url>::SIZE];
+                    if let Some(bytes) = try_decode_from_base64url(base64, &mut dst) {
+                        if bytes.len() != <Self as Base64Url>::SIZE {
                             return None;
                         }
 
@@ -232,8 +302,10 @@ impl_base64!(u8, u16, u32, u64, u128, i8, i16, i32, i64, i128);
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloc::fmt::Debug;
+    #[cfg(feature = "alloc")]
+    use core::fmt::Debug;
 
+    #[cfg(feature = "alloc")]
     fn assert_primitive_encoding<T>(value: T, expected: &str)
     where
         T: Base64 + Base64Url + Copy + Debug + Eq,
@@ -259,6 +331,7 @@ mod tests {
         assert_eq!(T::try_from_base64url(&encoded_url), Some(value));
     }
 
+    #[cfg(feature = "alloc")]
     #[test]
     fn integer_primitive_encodings_are_pinned() {
         macro_rules! assert_min_and_max_encoding {
@@ -285,6 +358,66 @@ mod tests {
     }
 
     #[test]
+    fn integer_byte_sizes_are_pinned() {
+        macro_rules! assert_size {
+            ($ty:ty, $size:literal) => {
+                assert_eq!(<$ty as Base64>::SIZE, $size);
+                assert_eq!(<$ty as Base64Url>::SIZE, $size);
+            };
+        }
+
+        assert_size!(u8, 1);
+        assert_size!(u16, 2);
+        assert_size!(u32, 4);
+        assert_size!(u64, 8);
+        assert_size!(u128, 16);
+
+        assert_size!(i8, 1);
+        assert_size!(i16, 2);
+        assert_size!(i32, 4);
+        assert_size!(i64, 8);
+        assert_size!(i128, 16);
+    }
+
+    #[test]
+    fn no_alloc_integer_encoding_is_full_width_and_preserves_the_tail() {
+        let mut base64 = [b'!'; 6];
+        assert_eq!(
+            0xfbu8.try_as_base64_into(&mut base64),
+            Some(b"+w==".as_slice()),
+        );
+        assert_eq!(&base64[4..], b"!!");
+
+        let mut base64url = [b'?'; 6];
+        assert_eq!(
+            0xfbu8.try_as_base64url_into(&mut base64url),
+            Some(b"-w==".as_slice()),
+        );
+        assert_eq!(&base64url[4..], b"??");
+
+        let mut signed = [0; 4];
+        assert_eq!(
+            i16::MIN.try_as_base64_into(&mut signed),
+            Some(b"gAA=".as_slice()),
+        );
+        assert_eq!(
+            i16::MIN.try_as_base64url_into(&mut signed),
+            Some(b"gAA=".as_slice()),
+        );
+    }
+
+    #[test]
+    fn no_alloc_integer_encoding_returns_none_for_a_short_destination() {
+        let mut base64 = [b'!'; 3];
+        assert_eq!(0xfbu8.try_as_base64_into(&mut base64), None);
+        assert_eq!(base64, [b'!'; 3]);
+
+        let mut base64url = [b'?'; 3];
+        assert_eq!(0xfbu8.try_as_base64url_into(&mut base64url), None);
+        assert_eq!(base64url, [b'?'; 3]);
+    }
+
+    #[test]
     fn integer_primitive_decoding_requires_the_exact_data_width() {
         assert_eq!(u32::try_from_base64(b"AAA="), None);
         assert_eq!(u32::try_from_base64(b"AAAAAA=="), Some(0));
@@ -308,6 +441,7 @@ mod tests {
         assert_eq!(u8::try_from_base64url(b"/w=="), None);
     }
 
+    #[cfg(feature = "alloc")]
     #[test]
     fn trim_base64_end_padding_removes_only_trailing_padding() {
         assert_eq!(

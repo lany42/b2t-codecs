@@ -30,7 +30,7 @@
 //!
 //! - [x] No-alloc API for Base16, v2.0
 //! - [x] No-alloc API for Base32, v2.1
-//! - [ ] No-alloc API for Base64, v2.2
+//! - [x] No-alloc API for Base64, v2.2
 //! - [ ] No-alloc API for Base85, v2.3
 //!
 //! ## Codecs
@@ -107,14 +107,18 @@ pub use codecs::base32::{
     encode_base32, encode_base32_string, encode_base32hex, encode_base32hex_string,
     try_decode_base32, try_decode_base32_string, try_decode_base32hex, try_decode_base32hex_string,
 };
-#[cfg(feature = "alloc")]
 pub use codecs::base64;
+pub use codecs::base64::{
+    Base64, Base64Url, decoded_length_base64, decoded_length_base64ext, encoded_length_base64,
+    try_decode_from_base64, try_decode_from_base64ext, try_decode_from_base64url,
+    try_decode_from_base64urlext, try_encode_into_base64, try_encode_into_base64url,
+};
 #[cfg(feature = "alloc")]
 pub use codecs::base64::{
-    Base64, Base64Url, encode_base64, encode_base64_string, encode_base64url,
-    encode_base64url_string, trim_base64_end_padding, try_decode_base64, try_decode_base64_string,
-    try_decode_base64ext, try_decode_base64ext_string, try_decode_base64url,
-    try_decode_base64url_string, try_decode_base64urlext, try_decode_base64urlext_string,
+    encode_base64, encode_base64_string, encode_base64url, encode_base64url_string,
+    trim_base64_end_padding, try_decode_base64, try_decode_base64_string, try_decode_base64ext,
+    try_decode_base64ext_string, try_decode_base64url, try_decode_base64url_string,
+    try_decode_base64urlext, try_decode_base64urlext_string,
 };
 #[cfg(feature = "alloc")]
 pub use codecs::base85;

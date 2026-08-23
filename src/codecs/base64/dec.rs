@@ -7,14 +7,17 @@
 //! padding-only quanta.
 //!
 //! ```rust
-//! use b2t_codecs::base64::{try_decode_base64_string, try_decode_base64ext_string};
+//! use b2t_codecs::base64::{try_decode_from_base64, try_decode_from_base64ext};
+//!
+//! let mut strict = [0; 1];
+//! let mut extended = [0; 1];
 //!
 //! assert_eq!(
-//!     try_decode_base64_string("Zg==").as_deref(),
+//!     try_decode_from_base64(b"Zg==", &mut strict),
 //!     Some(b"f".as_slice()),
 //! );
 //! assert_eq!(
-//!     try_decode_base64ext_string("Zg").as_deref(),
+//!     try_decode_from_base64ext(b"Zg", &mut extended),
 //!     Some(b"f".as_slice()),
 //! );
 //! ```
@@ -36,10 +39,11 @@ use alloc::{boxed::Box, vec::Vec};
 ///
 /// Returns [`None`] unless `base64` uses the standard RFC 4648 alphabet,
 /// complete four-symbol quanta, terminal padding, and zero pad bits.
+#[cfg(feature = "alloc")]
 #[must_use = "the decoding result should be handled"]
 #[inline]
 pub fn try_decode_base64_string(base64: &str) -> Option<Box<[u8]>> {
-    BASE64_RFC.try_decode_base64_string(base64)
+    BASE64_RFC.try_decode_strict_string(base64)
 }
 
 /// Decodes a Base64 string using extended framing.
@@ -47,20 +51,22 @@ pub fn try_decode_base64_string(base64: &str) -> Option<Box<[u8]>> {
 /// Padded quanta may be concatenated, padding-only quanta are ignored, and the
 /// final quantum may omit padding. Returns [`None`] for an invalid alphabet,
 /// malformed padding, non-zero pad bits, or a one-symbol tail.
+#[cfg(feature = "alloc")]
 #[must_use = "the decoding result should be handled"]
 #[inline]
 pub fn try_decode_base64ext_string(base64: &str) -> Option<Box<[u8]>> {
-    BASE64_RFC.try_decode_base64ext_string(base64)
+    BASE64_RFC.try_decode_extended_string(base64)
 }
 
 /// Decodes canonical padded Base64 ASCII bytes.
 ///
 /// Returns [`None`] unless `base64` uses the standard RFC 4648 alphabet,
 /// complete four-symbol quanta, terminal padding, and zero pad bits.
+#[cfg(feature = "alloc")]
 #[must_use = "the decoding result should be handled"]
 #[inline]
 pub fn try_decode_base64(base64: &[u8]) -> Option<Box<[u8]>> {
-    BASE64_RFC.try_decode_base64(base64)
+    BASE64_RFC.try_decode_strict_boxed(base64)
 }
 
 /// Decodes Base64 ASCII bytes using extended framing.
@@ -68,20 +74,22 @@ pub fn try_decode_base64(base64: &[u8]) -> Option<Box<[u8]>> {
 /// Padded quanta may be concatenated, padding-only quanta are ignored, and the
 /// final quantum may omit padding. Returns [`None`] for an invalid alphabet,
 /// malformed padding, non-zero pad bits, or a one-symbol tail.
+#[cfg(feature = "alloc")]
 #[must_use = "the decoding result should be handled"]
 #[inline]
 pub fn try_decode_base64ext(base64: &[u8]) -> Option<Box<[u8]>> {
-    BASE64_RFC.try_decode_base64ext(base64)
+    BASE64_RFC.try_decode_extended_boxed(base64)
 }
 
 /// Decodes a canonical padded Base64URL string.
 ///
 /// Returns [`None`] unless `base64` uses the RFC 4648 URL-safe alphabet,
 /// complete four-symbol quanta, terminal padding, and zero pad bits.
+#[cfg(feature = "alloc")]
 #[must_use = "the decoding result should be handled"]
 #[inline]
 pub fn try_decode_base64url_string(base64: &str) -> Option<Box<[u8]>> {
-    BASE64_URL.try_decode_base64_string(base64)
+    BASE64_URL.try_decode_strict_string(base64)
 }
 
 /// Decodes a Base64URL string using extended framing.
@@ -89,20 +97,22 @@ pub fn try_decode_base64url_string(base64: &str) -> Option<Box<[u8]>> {
 /// Padded quanta may be concatenated, padding-only quanta are ignored, and the
 /// final quantum may omit padding. Returns [`None`] for an invalid URL-safe
 /// alphabet, malformed padding, non-zero pad bits, or a one-symbol tail.
+#[cfg(feature = "alloc")]
 #[must_use = "the decoding result should be handled"]
 #[inline]
 pub fn try_decode_base64urlext_string(base64: &str) -> Option<Box<[u8]>> {
-    BASE64_URL.try_decode_base64ext_string(base64)
+    BASE64_URL.try_decode_extended_string(base64)
 }
 
 /// Decodes canonical padded Base64URL ASCII bytes.
 ///
 /// Returns [`None`] unless `base64` uses the RFC 4648 URL-safe alphabet,
 /// complete four-symbol quanta, terminal padding, and zero pad bits.
+#[cfg(feature = "alloc")]
 #[must_use = "the decoding result should be handled"]
 #[inline]
 pub fn try_decode_base64url(base64: &[u8]) -> Option<Box<[u8]>> {
-    BASE64_URL.try_decode_base64(base64)
+    BASE64_URL.try_decode_strict_boxed(base64)
 }
 
 /// Decodes Base64URL ASCII bytes using extended framing.
@@ -110,10 +120,136 @@ pub fn try_decode_base64url(base64: &[u8]) -> Option<Box<[u8]>> {
 /// Padded quanta may be concatenated, padding-only quanta are ignored, and the
 /// final quantum may omit padding. Returns [`None`] for an invalid URL-safe
 /// alphabet, malformed padding, non-zero pad bits, or a one-symbol tail.
+#[cfg(feature = "alloc")]
 #[must_use = "the decoding result should be handled"]
 #[inline]
 pub fn try_decode_base64urlext(base64: &[u8]) -> Option<Box<[u8]>> {
-    BASE64_URL.try_decode_base64ext(base64)
+    BASE64_URL.try_decode_extended_boxed(base64)
+}
+
+/// Decodes canonical padded Base64 ASCII from `src` into the beginning of
+/// `dst`.
+///
+/// Returns the initialized prefix of `dst`, or [`None`] if `src` is malformed,
+/// non-canonical, or `dst` is shorter than
+/// [`decoded_length_base64(src)`](decoded_length_base64). A short destination
+/// is left unchanged. This function does not allocate.
+///
+/// If decoding returns [`None`] because of invalid input, `dst` may have been
+/// partially modified.
+#[must_use = "the decoded slice should be used"]
+#[inline]
+pub fn try_decode_from_base64<'a>(src: &[u8], dst: &'a mut [u8]) -> Option<&'a [u8]> {
+    BASE64_RFC.try_decode_strict_into(src, dst)
+}
+
+/// Decodes canonical padded Base64URL ASCII from `src` into the beginning of
+/// `dst`.
+///
+/// Returns the initialized prefix of `dst`, or [`None`] if `src` is malformed,
+/// non-canonical, or `dst` is shorter than
+/// [`decoded_length_base64(src)`](decoded_length_base64). A short destination
+/// is left unchanged. This function does not allocate.
+///
+/// If decoding returns [`None`] because of invalid input, `dst` may have been
+/// partially modified.
+#[must_use = "the decoded slice should be used"]
+#[inline]
+pub fn try_decode_from_base64url<'a>(src: &[u8], dst: &'a mut [u8]) -> Option<&'a [u8]> {
+    BASE64_URL.try_decode_strict_into(src, dst)
+}
+
+/// Decodes Base64 ASCII from `src` into `dst` using extended framing.
+///
+/// `dst` must be at least
+/// [`decoded_length_base64ext(src)`](decoded_length_base64ext) bytes long, even
+/// when the actual output is shorter; otherwise this returns [`None`] without
+/// modifying `dst`.
+///
+/// Padded quanta may be concatenated, padding-only quanta are ignored, and the
+/// final quantum may omit padding. Returns the initialized prefix of `dst`, or
+/// [`None`] for invalid input. This function does not allocate.
+///
+/// If decoding returns [`None`] because of invalid input, `dst` may have been
+/// partially modified.
+#[must_use = "the decoded slice should be used"]
+#[inline]
+pub fn try_decode_from_base64ext<'a>(src: &[u8], dst: &'a mut [u8]) -> Option<&'a [u8]> {
+    BASE64_RFC.try_decode_extended_into(src, dst)
+}
+
+/// Decodes Base64URL ASCII from `src` into `dst` using extended framing.
+///
+/// `dst` must be at least
+/// [`decoded_length_base64ext(src)`](decoded_length_base64ext) bytes long, even
+/// when the actual output is shorter; otherwise this returns [`None`] without
+/// modifying `dst`.
+///
+/// Padded quanta may be concatenated, padding-only quanta are ignored, and the
+/// final quantum may omit padding. Returns the initialized prefix of `dst`, or
+/// [`None`] for invalid input. This function does not allocate.
+///
+/// If decoding returns [`None`] because of invalid input, `dst` may have been
+/// partially modified.
+#[must_use = "the decoded slice should be used"]
+#[inline]
+pub fn try_decode_from_base64urlext<'a>(src: &[u8], dst: &'a mut [u8]) -> Option<&'a [u8]> {
+    BASE64_URL.try_decode_extended_into(src, dst)
+}
+
+/// Returns the exact decoded length of a padded Base64 slice.
+///
+/// Returns [`None`] unless `src` contains complete four-symbol quanta and its
+/// trailing padding length is valid for canonical Base64. This function does
+/// not validate the alphabet, pad bits, or padding outside the final quantum.
+#[must_use = "the decoded size should be used"]
+#[inline]
+pub fn decoded_length_base64(src: &[u8]) -> Option<usize> {
+    let len = src.len();
+    if !len.is_multiple_of(4) {
+        return None;
+    }
+
+    let decoded_len = (len / 4) * 3;
+    let tail_shortfall = match count_tail_padding(src) {
+        0 => 0,
+        1 => 1,
+        2 => 2,
+        _ => return None,
+    };
+
+    Some(decoded_len - tail_shortfall)
+}
+
+/// Returns the destination capacity required by the extended slice decoders.
+///
+/// Every complete four-symbol quantum is counted as three output bytes, while
+/// a final unpadded two- or three-symbol quantum is counted as one or two bytes.
+/// Returns [`None`] for a one-symbol final quantum. This constant-time upper
+/// bound does not inspect `src`, so padded and padding-only quanta can make it
+/// larger than the actual decoded output. It also does not validate the
+/// alphabet, pad bits, or padding placement.
+#[must_use = "the decoded size should be used"]
+#[inline]
+pub fn decoded_length_base64ext(src: &[u8]) -> Option<usize> {
+    let tail_len = match src.len() % 4 {
+        0 => 0,
+        1 => return None,
+        2 => 1,
+        3 => 2,
+        _ => unreachable!("a four-symbol remainder is impossible"),
+    };
+
+    (src.len() / 4).checked_mul(3)?.checked_add(tail_len)
+}
+
+#[inline]
+fn count_tail_padding(src: &[u8]) -> usize {
+    src.iter()
+        .rev()
+        .take(4)
+        .take_while(|&&byte| byte == BASE64_PAD)
+        .count()
 }
 
 struct Decoder<'d> {
@@ -138,107 +274,188 @@ impl<'d> Decoder<'d> {
         }
     }
 
+    #[cfg(feature = "alloc")]
     #[inline]
-    fn try_decode_base64ext_string(&self, base64: &str) -> Option<Box<[u8]>> {
-        self.try_decode_base64ext(base64.as_bytes())
+    fn try_decode_strict_string(&self, base64: &str) -> Option<Box<[u8]>> {
+        self.try_decode_strict_boxed(base64.as_bytes())
     }
 
+    #[cfg(feature = "alloc")]
     #[inline]
-    fn try_decode_base64_string(&self, base64: &str) -> Option<Box<[u8]>> {
-        self.try_decode_base64(base64.as_bytes())
+    fn try_decode_extended_string(&self, base64: &str) -> Option<Box<[u8]>> {
+        self.try_decode_extended_boxed(base64.as_bytes())
     }
 
-    // extended decoder supports:
-    //  - unpadded tails
-    //  - concatenated base64 strings
-    //  - skips all-padding chunks
-    fn try_decode_base64ext(&self, base64: &[u8]) -> Option<Box<[u8]>> {
-        // empty inputs result in empty outputs
+    #[cfg(feature = "alloc")]
+    fn try_decode_strict_boxed(&self, base64: &[u8]) -> Option<Box<[u8]>> {
         if base64.is_empty() {
             return Some(Vec::<u8>::new().into_boxed_slice());
         }
 
-        // unpadded tail implies up to two extra bytes
-        let cap = base64.len().checked_mul(3)? / 4 + 2;
-
-        let (chunks, remainder) = base64.as_chunks::<4>();
-        let mut ret = Vec::<u8>::with_capacity(cap);
-
-        for &chunk in chunks {
-            match chunk {
-                // skip chunks with only padding
-                [BASE64_PAD, BASE64_PAD, BASE64_PAD, BASE64_PAD] => {}
-                [_, _, BASE64_PAD, BASE64_PAD] => {
-                    let byte = self.decode_base64_two_pads(chunk)?;
-                    ret.push(byte);
-                }
-                [_, _, _, BASE64_PAD] => {
-                    let chunk = self.decode_base64_one_pad(chunk)?;
-                    ret.extend_from_slice(&chunk);
-                }
-                _ => {
-                    let chunk = self.decode_base64_full_chunk(chunk)?;
-                    ret.extend_from_slice(&chunk);
-                }
-            }
-        }
-
-        // handle a tail with implied padding, if any
-        if !remainder.is_empty() {
-            // malformed if one ASCII character
-            if remainder.len() == 1 {
-                return None;
-            }
-
-            // [x, x] OR [x, x, x]
-            self.decode_base64_tail(remainder, &mut ret)?;
-        }
-
-        Some(ret.into_boxed_slice())
-    }
-
-    fn try_decode_base64(&self, base64: &[u8]) -> Option<Box<[u8]>> {
-        // empty inputs result in empty outputs
-        if base64.is_empty() {
-            return Some(Vec::<u8>::new().into_boxed_slice());
-        }
-
-        // INVARIANT: strict base64 encodes four ASCII per three bytes
-        if !base64.len().is_multiple_of(4) {
-            return None;
-        }
-
-        let cap = base64.len().checked_mul(3)? / 4;
-        let mut ret = Vec::<u8>::with_capacity(cap);
-
+        let payload_len = decoded_length_base64(base64)?;
         let (chunks, []) = base64.as_chunks::<4>() else {
-            unreachable!("base64 slice always a multiple of four")
+            unreachable!("decoded_length_base64 requires complete four-symbol quanta")
         };
         let (tail, chunks) = chunks.split_last().unwrap();
 
-        // whole chunks
-        // padding characters are malformed here
+        let mut dst = Box::<[u8]>::new_uninit_slice(payload_len);
+        let mut written = 0usize;
+
+        // Padding characters are malformed before the final quantum.
         for &chunk in chunks {
-            ret.extend_from_slice(&self.decode_base64_full_chunk(chunk)?);
+            let chunk = self.decode_base64_full_chunk(chunk)?;
+            dst[written..written + 3].write_copy_of_slice(&chunk);
+            written += 3;
         }
 
-        // handle padding at the tail
-        match tail {
-            [_, _, BASE64_PAD, BASE64_PAD] => {
+        match count_tail_padding(tail) {
+            2 => {
                 let byte = self.decode_base64_two_pads(*tail)?;
-                ret.push(byte);
+                dst[written].write(byte);
+                written += 1;
             }
-            [_, _, _, BASE64_PAD] => {
+            1 => {
                 let chunk = self.decode_base64_one_pad(*tail)?;
-                ret.extend_from_slice(&chunk);
+                dst[written..written + 2].write_copy_of_slice(&chunk);
+                written += 2;
             }
-            _ => {
+            0 => {
                 let chunk = self.decode_base64_full_chunk(*tail)?;
-                ret.extend_from_slice(&chunk);
+                dst[written..written + 3].write_copy_of_slice(&chunk);
+                written += 3;
             }
+            _ => unreachable!("the padding length was validated before allocation"),
         }
 
-        Some(ret.into_boxed_slice())
+        // SAFETY:
+        //  - `dst` contains `payload_len` consecutive `MaybeUninit<u8>` values.
+        //  - Successful chunk decoding writes every output byte into distinct,
+        //    in-bounds elements of `dst`.
+        //  - `written == dst.len()` verifies that every element was initialized.
+        unsafe {
+            // INVARIANT: all allocated elements were initialized.
+            assert!(written == dst.len());
+            Some(dst.assume_init())
+        }
+    }
+
+    #[cfg(feature = "alloc")]
+    fn try_decode_extended_boxed(&self, base64: &[u8]) -> Option<Box<[u8]>> {
+        if base64.is_empty() {
+            return Some(Vec::<u8>::new().into_boxed_slice());
+        }
+
+        let payload_capacity = decoded_length_base64ext(base64)?;
+        let mut dst = Vec::<u8>::with_capacity(payload_capacity);
+        let (chunks, rem) = base64.as_chunks::<4>();
+
+        for &chunk in chunks {
+            let (chunk, len) = self.decode_base64_extended_chunk(chunk)?;
+            dst.extend_from_slice(&chunk[..len]);
+        }
+
+        if !rem.is_empty() {
+            let (chunk, len) = self.decode_base64_unpadded_tail(rem)?;
+            dst.extend_from_slice(&chunk[..len]);
+        }
+
+        // INVARIANT: every complete quantum emits at most three bytes and the
+        // optional unpadded tail emits at most two bytes.
+        assert!(dst.len() <= payload_capacity);
+        Some(dst.into_boxed_slice())
+    }
+
+    fn try_decode_strict_into<'a>(&self, src: &[u8], dst: &'a mut [u8]) -> Option<&'a [u8]> {
+        if src.is_empty() {
+            return Some(&dst[..0]);
+        }
+
+        let payload_len = decoded_length_base64(src)?;
+        if dst.len() < payload_len {
+            return None;
+        }
+
+        let (chunks, []) = src.as_chunks::<4>() else {
+            unreachable!("decoded_length_base64 requires complete four-symbol quanta")
+        };
+        let (tail, chunks) = chunks.split_last().unwrap();
+        let mut written = 0usize;
+
+        // Padding characters are malformed before the final quantum.
+        for &chunk in chunks {
+            let chunk = self.decode_base64_full_chunk(chunk)?;
+            dst[written..written + 3].copy_from_slice(&chunk);
+            written += 3;
+        }
+
+        match count_tail_padding(tail) {
+            2 => {
+                dst[written] = self.decode_base64_two_pads(*tail)?;
+                written += 1;
+            }
+            1 => {
+                let chunk = self.decode_base64_one_pad(*tail)?;
+                dst[written..written + 2].copy_from_slice(&chunk);
+                written += 2;
+            }
+            0 => {
+                let chunk = self.decode_base64_full_chunk(*tail)?;
+                dst[written..written + 3].copy_from_slice(&chunk);
+                written += 3;
+            }
+            _ => unreachable!("the padding length was validated before decoding"),
+        }
+
+        // INVARIANT: successful decoding writes exactly `payload_len` bytes.
+        assert!(written == payload_len);
+        Some(&dst[..written])
+    }
+
+    fn try_decode_extended_into<'a>(&self, src: &[u8], dst: &'a mut [u8]) -> Option<&'a [u8]> {
+        if src.is_empty() {
+            return Some(&dst[..0]);
+        }
+
+        let payload_capacity = decoded_length_base64ext(src)?;
+        if dst.len() < payload_capacity {
+            return None;
+        }
+
+        let (chunks, rem) = src.as_chunks::<4>();
+        let mut written = 0usize;
+
+        for &chunk in chunks {
+            let (chunk, len) = self.decode_base64_extended_chunk(chunk)?;
+            dst[written..written + len].copy_from_slice(&chunk[..len]);
+            written += len;
+        }
+
+        if !rem.is_empty() {
+            let (chunk, len) = self.decode_base64_unpadded_tail(rem)?;
+            dst[written..written + len].copy_from_slice(&chunk[..len]);
+            written += len;
+        }
+
+        // INVARIANT: every complete quantum emits at most three bytes and the
+        // optional unpadded tail emits at most two bytes.
+        assert!(written <= payload_capacity);
+        Some(&dst[..written])
+    }
+
+    fn decode_base64_extended_chunk(&self, chunk: [u8; 4]) -> Option<([u8; 3], usize)> {
+        match count_tail_padding(&chunk) {
+            4 => Some(([0; 3], 0)),
+            2 => {
+                let byte = self.decode_base64_two_pads(chunk)?;
+                Some(([byte, 0, 0], 1))
+            }
+            1 => {
+                let [on, tw] = self.decode_base64_one_pad(chunk)?;
+                Some(([on, tw, 0], 2))
+            }
+            0 => Some((self.decode_base64_full_chunk(chunk)?, 3)),
+            _ => None,
+        }
     }
 
     fn decode_base64_full_chunk(&self, chunk: [u8; 4]) -> Option<[u8; 3]> {
@@ -297,19 +514,15 @@ impl<'d> Decoder<'d> {
         Some([bytes[1], bytes[2]])
     }
 
-    // tail length 2 OR 3
-    fn decode_base64_tail(&self, tail: &[u8], ret: &mut Vec<u8>) -> Option<()> {
-        let length = tail.len();
-
+    // Unpadded tail length 2 OR 3, returning a fixed buffer and used length.
+    fn decode_base64_unpadded_tail(&self, tail: &[u8]) -> Option<([u8; 2], usize)> {
         let mut buf = [BASE64_PAD; 4];
-        buf[..length].copy_from_slice(tail);
-        match length {
-            2 => ret.push(self.decode_base64_two_pads(buf)?),
-            3 => ret.extend_from_slice(&self.decode_base64_one_pad(buf)?),
+        buf[..tail.len()].copy_from_slice(tail);
+        match tail.len() {
+            2 => Some(([self.decode_base64_two_pads(buf)?, 0], 1)),
+            3 => Some((self.decode_base64_one_pad(buf)?, 2)),
             _ => unreachable!("tail length must be 2 or 3"),
         }
-
-        Some(())
     }
 
     fn check_and_decode_b64_byte(&self, byte: u8) -> Option<u32> {
@@ -333,14 +546,18 @@ impl<'d> Decoder<'d> {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "alloc")]
     use super::super::enc::{encode_base64, encode_base64url};
+    use super::super::enc::{try_encode_into_base64, try_encode_into_base64url};
     use super::super::{ENCODER, ENCODER_URL};
     use super::*;
 
-    use alloc::vec;
-
+    #[cfg(feature = "alloc")]
     type Decode = fn(&[u8]) -> Option<Box<[u8]>>;
+    type EncodeInto = for<'a> fn(&[u8], &'a mut [u8]) -> Option<&'a [u8]>;
+    type DecodeInto = for<'a> fn(&[u8], &'a mut [u8]) -> Option<&'a [u8]>;
 
+    #[cfg(feature = "alloc")]
     fn strict_decoders() -> [(&'static str, Decode); 2] {
         [
             ("Base64 strict", try_decode_base64),
@@ -348,6 +565,7 @@ mod tests {
         ]
     }
 
+    #[cfg(feature = "alloc")]
     fn extended_decoders() -> [(&'static str, Decode); 2] {
         [
             ("Base64 extended", try_decode_base64ext),
@@ -355,6 +573,7 @@ mod tests {
         ]
     }
 
+    #[cfg(feature = "alloc")]
     fn all_decoders() -> [(&'static str, Decode); 4] {
         [
             ("Base64 strict", try_decode_base64),
@@ -364,6 +583,307 @@ mod tests {
         ]
     }
 
+    fn strict_decoders_into() -> [(&'static str, DecodeInto); 2] {
+        [
+            ("Base64 strict", try_decode_from_base64),
+            ("Base64URL strict", try_decode_from_base64url),
+        ]
+    }
+
+    fn extended_decoders_into() -> [(&'static str, DecodeInto); 2] {
+        [
+            ("Base64 extended", try_decode_from_base64ext),
+            ("Base64URL extended", try_decode_from_base64urlext),
+        ]
+    }
+
+    fn all_decoders_into() -> [(&'static str, DecodeInto); 4] {
+        [
+            ("Base64 strict", try_decode_from_base64),
+            ("Base64 extended", try_decode_from_base64ext),
+            ("Base64URL strict", try_decode_from_base64url),
+            ("Base64URL extended", try_decode_from_base64urlext),
+        ]
+    }
+
+    #[test]
+    fn decoded_lengths_are_exact_for_strict_framing() {
+        assert_eq!(decoded_length_base64(b""), Some(0));
+        assert_eq!(decoded_length_base64(b"A"), None);
+        assert_eq!(decoded_length_base64(b"AAA"), None);
+        assert_eq!(decoded_length_base64(b"AAAA"), Some(3));
+        assert_eq!(decoded_length_base64(b"Zg=="), Some(1));
+        assert_eq!(decoded_length_base64(b"Zm8="), Some(2));
+        assert_eq!(decoded_length_base64(b"Zm9v"), Some(3));
+        assert_eq!(decoded_length_base64(b"Zm9vYg=="), Some(4));
+        assert_eq!(decoded_length_base64(b"A==="), None);
+        assert_eq!(decoded_length_base64(b"===="), None);
+
+        assert_eq!(count_tail_padding(b"AAAA"), 0);
+        assert_eq!(count_tail_padding(b"AAA="), 1);
+        assert_eq!(count_tail_padding(b"AA=="), 2);
+        assert_eq!(count_tail_padding(b"A==="), 3);
+        assert_eq!(count_tail_padding(b"========"), 4);
+    }
+
+    #[test]
+    fn decoded_lengths_are_upper_bounds_for_extended_framing() {
+        assert_eq!(decoded_length_base64ext(b""), Some(0));
+        assert_eq!(decoded_length_base64ext(b"A"), None);
+        assert_eq!(decoded_length_base64ext(b"AA"), Some(1));
+        assert_eq!(decoded_length_base64ext(b"AAA"), Some(2));
+        assert_eq!(decoded_length_base64ext(b"AAAA"), Some(3));
+        assert_eq!(decoded_length_base64ext(b"Zg=="), Some(3));
+        assert_eq!(decoded_length_base64ext(b"Zm8="), Some(3));
+        assert_eq!(decoded_length_base64ext(b"===="), Some(3));
+        assert_eq!(decoded_length_base64ext(b"TQ==TWE="), Some(6));
+        assert_eq!(decoded_length_base64ext(b"TQ======TQ=="), Some(9));
+        assert_eq!(decoded_length_base64ext(b"AAAAAA"), Some(4));
+        assert_eq!(decoded_length_base64ext(b"AAAAAAA"), Some(5));
+        assert_eq!(decoded_length_base64ext(b"AAAAA"), None);
+    }
+
+    #[test]
+    fn rfc_vectors_decode_through_non_allocating_paths() {
+        let vectors: &[(&[u8], &str)] = &[
+            (b"", ""),
+            (b"f", "Zg=="),
+            (b"fo", "Zm8="),
+            (b"foo", "Zm9v"),
+            (b"foob", "Zm9vYg=="),
+            (b"fooba", "Zm9vYmE="),
+            (b"foobar", "Zm9vYmFy"),
+        ];
+
+        for &(plain, encoded) in vectors {
+            let mut dst = [0u8; 6];
+            assert_eq!(
+                try_decode_from_base64(encoded.as_bytes(), &mut dst),
+                Some(plain),
+            );
+
+            let mut dst = [0u8; 6];
+            assert_eq!(
+                try_decode_from_base64ext(encoded.as_bytes(), &mut dst),
+                Some(plain),
+            );
+
+            let mut dst = [0u8; 6];
+            assert_eq!(
+                try_decode_from_base64url(encoded.as_bytes(), &mut dst),
+                Some(plain),
+            );
+
+            let mut dst = [0u8; 6];
+            assert_eq!(
+                try_decode_from_base64urlext(encoded.as_bytes(), &mut dst),
+                Some(plain),
+            );
+        }
+    }
+
+    #[test]
+    fn non_allocating_decoders_select_the_requested_alphabet() {
+        let vectors: &[(&[u8], &str, &str)] = &[
+            (&[0xfb], "+w==", "-w=="),
+            (&[0xfb, 0xff], "+/8=", "-_8="),
+            (&[0xfb, 0xff, 0xff], "+///", "-___"),
+        ];
+
+        for &(plain, base64, base64url) in vectors {
+            let mut dst = [0u8; 3];
+            assert_eq!(
+                try_decode_from_base64(base64.as_bytes(), &mut dst),
+                Some(plain),
+            );
+            assert_eq!(try_decode_from_base64(base64url.as_bytes(), &mut dst), None,);
+
+            let mut dst = [0u8; 3];
+            assert_eq!(
+                try_decode_from_base64url(base64url.as_bytes(), &mut dst),
+                Some(plain),
+            );
+            assert_eq!(try_decode_from_base64url(base64.as_bytes(), &mut dst), None,);
+
+            let mut dst = [0u8; 3];
+            assert_eq!(
+                try_decode_from_base64ext(base64.as_bytes(), &mut dst),
+                Some(plain),
+            );
+            assert_eq!(
+                try_decode_from_base64ext(base64url.as_bytes(), &mut dst),
+                None,
+            );
+
+            let mut dst = [0u8; 3];
+            assert_eq!(
+                try_decode_from_base64urlext(base64url.as_bytes(), &mut dst),
+                Some(plain),
+            );
+            assert_eq!(
+                try_decode_from_base64urlext(base64.as_bytes(), &mut dst),
+                None,
+            );
+        }
+    }
+
+    #[test]
+    fn non_allocating_decoders_preserve_destination_bounds() {
+        for (name, decode) in all_decoders_into() {
+            let mut short = [0xa5; 5];
+            assert_eq!(decode(b"Zm9vYmFy", &mut short), None, "{name}");
+            assert_eq!(short, [0xa5; 5], "{name} modified a short destination");
+
+            let mut oversized = [0xa5; 8];
+            assert_eq!(
+                decode(b"Zm9vYmFy", &mut oversized),
+                Some(b"foobar".as_slice()),
+                "{name}",
+            );
+            assert_eq!(
+                &oversized[6..],
+                &[0xa5; 2],
+                "{name} modified the destination suffix",
+            );
+
+            assert_eq!(decode(b"", &mut oversized), Some([].as_slice()), "{name}");
+        }
+
+        for (name, decode) in extended_decoders_into() {
+            let mut padded_exact = [0xa5; 1];
+            assert_eq!(decode(b"TQ==", &mut padded_exact), None, "{name}");
+            assert_eq!(
+                padded_exact, [0xa5; 1],
+                "{name} modified a destination shorter than the upper bound",
+            );
+
+            let mut padding_only_exact = [0u8; 0];
+            assert_eq!(decode(b"====", &mut padding_only_exact), None, "{name}");
+
+            let mut exact = [0xa5; 2];
+            assert_eq!(decode(b"TQ==TQ==", &mut exact), None, "{name}");
+            assert_eq!(
+                exact, [0xa5; 2],
+                "{name} modified a destination shorter than the upper bound",
+            );
+
+            let mut upper_bound = [0xa5; 6];
+            assert_eq!(
+                decode(b"TQ==TQ==", &mut upper_bound),
+                Some(b"MM".as_slice()),
+                "{name}",
+            );
+            assert_eq!(&upper_bound[2..], &[0xa5; 4]);
+        }
+    }
+
+    #[test]
+    fn non_allocating_decoders_reject_noncanonical_inputs() {
+        for (name, decode) in all_decoders_into() {
+            let mut dst = [0u8; 3];
+            assert_eq!(decode(b"TQ==", &mut dst), Some(b"M".as_slice()), "{name}");
+            assert_eq!(decode(b"TR==", &mut dst), None, "{name} accepted pad bits");
+            assert_eq!(decode(b"TWE=", &mut dst), Some(b"Ma".as_slice()), "{name}");
+            assert_eq!(decode(b"TWF=", &mut dst), None, "{name} accepted pad bits");
+        }
+
+        for (name, decode) in strict_decoders_into() {
+            let mut dst = [0u8; 3];
+            for input in [b"A".as_slice(), b"Zg".as_slice(), b"Zm8".as_slice()] {
+                assert_eq!(decode(input, &mut dst), None, "{name} accepted {input:?}");
+            }
+        }
+
+        for (name, decode) in extended_decoders_into() {
+            let mut dst = [0u8; 3];
+            assert_eq!(decode(b"TQ", &mut dst), Some(b"M".as_slice()), "{name}");
+            assert_eq!(decode(b"TR", &mut dst), None, "{name} accepted pad bits");
+            assert_eq!(decode(b"TWE", &mut dst), Some(b"Ma".as_slice()), "{name}");
+            assert_eq!(decode(b"TWF", &mut dst), None, "{name} accepted pad bits");
+        }
+    }
+
+    #[test]
+    fn extended_slice_decoders_preserve_extended_framing() {
+        let cases: &[(&[u8], &[u8])] = &[
+            (b"Zg", b"f"),
+            (b"Zm8", b"fo"),
+            (b"====", b""),
+            (b"========", b""),
+            (b"TQ==TWE=", b"MMa"),
+            (b"TQ======TQ==", b"MM"),
+        ];
+
+        for (name, decode) in extended_decoders_into() {
+            for &(input, expected) in cases {
+                let mut dst = [0xa5; 9];
+                assert_eq!(decode(input, &mut dst), Some(expected), "{name}: {input:?}");
+                assert_eq!(
+                    &dst[expected.len()..],
+                    &[0xa5; 9][expected.len()..],
+                    "{name} modified the suffix for {input:?}",
+                );
+            }
+
+            let mut dst = [0u8; 4];
+            for input in [
+                b"A".as_slice(),
+                b"AAAAA".as_slice(),
+                b"=AAA".as_slice(),
+                b"A=AA".as_slice(),
+                b"AA=A".as_slice(),
+                b"A===".as_slice(),
+                b"===A".as_slice(),
+                b"AA=".as_slice(),
+            ] {
+                assert_eq!(decode(input, &mut dst), None, "{name} accepted {input:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn arbitrary_byte_slices_roundtrip_through_non_allocating_codecs() {
+        let codecs: [(&str, EncodeInto, DecodeInto, DecodeInto); 2] = [
+            (
+                "Base64",
+                try_encode_into_base64,
+                try_decode_from_base64,
+                try_decode_from_base64ext,
+            ),
+            (
+                "Base64URL",
+                try_encode_into_base64url,
+                try_decode_from_base64url,
+                try_decode_from_base64urlext,
+            ),
+        ];
+
+        let mut input = [0u8; 64];
+        let mut encoded = [0u8; 88];
+        let mut decoded = [0u8; 66];
+
+        for len in 0usize..=input.len() {
+            for (i, byte) in input[..len].iter_mut().enumerate() {
+                *byte = (i.wrapping_mul(73).wrapping_add(len * 19)) as u8;
+            }
+
+            for (name, encode, strict, extended) in codecs {
+                let encoded = encode(&input[..len], &mut encoded).unwrap();
+                assert_eq!(
+                    strict(encoded, &mut decoded),
+                    Some(&input[..len]),
+                    "{name} strict failed to roundtrip {len} data bytes",
+                );
+                assert_eq!(
+                    extended(encoded, &mut decoded),
+                    Some(&input[..len]),
+                    "{name} extended failed to roundtrip {len} data bytes",
+                );
+            }
+        }
+    }
+
+    #[cfg(feature = "alloc")]
     #[test]
     fn rfc_4648_base64_test_vectors_pin_decoding() {
         let vectors: &[(&[u8], &str)] = &[
@@ -406,6 +926,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "alloc")]
     #[test]
     fn base64url_decoding_uses_url_safe_alphabet() {
         let vectors: &[(&[u8], &str, &str)] = &[
@@ -439,7 +960,7 @@ mod tests {
             assert!(decoder.max_ascii > decoder.min_ascii);
             assert_eq!(decoder.max_ascii - decoder.min_ascii, decoder.decoder.len());
 
-            let mut seen = vec![false; decoder.decoder.len()];
+            let mut seen = [false; 80];
             for (digit, &ascii) in encoder.iter().enumerate() {
                 let ascii = ascii as usize;
                 assert!((decoder.min_ascii..decoder.max_ascii).contains(&ascii));
@@ -464,6 +985,7 @@ mod tests {
         assert_invariants(&BASE64_URL, &ENCODER_URL);
     }
 
+    #[cfg(feature = "alloc")]
     #[test]
     fn byte_slices_of_arbitrary_lengths_roundtrip_through_every_decoder() {
         for len in 0usize..=64 {
@@ -497,6 +1019,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "alloc")]
     #[test]
     fn strict_decode_requires_complete_quanta() {
         for (name, decode) in strict_decoders() {
@@ -513,6 +1036,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "alloc")]
     #[test]
     fn every_decoder_rejects_non_zero_pad_bit_aliases() {
         let padded: &[(&str, &str, &[u8])] = &[("TQ==", "TR==", b"M"), ("TWE=", "TWF=", b"Ma")];
@@ -549,6 +1073,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "alloc")]
     #[test]
     fn strict_decode_rejects_non_terminal_or_malformed_padding() {
         for (name, decode) in strict_decoders() {
@@ -568,6 +1093,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "alloc")]
     #[test]
     fn extended_decode_accepts_unpadded_final_quantum() {
         for (name, decode) in extended_decoders() {
@@ -581,6 +1107,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "alloc")]
     #[test]
     fn extended_decode_accepts_padding_only_chunks() {
         for (name, decode) in extended_decoders() {
@@ -594,6 +1121,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "alloc")]
     #[test]
     fn extended_decode_treats_padded_quanta_as_concatenated_values() {
         for (name, decode) in extended_decoders() {
@@ -611,6 +1139,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "alloc")]
     #[test]
     fn extended_decode_rejects_single_ascii_tails() {
         for (name, decode) in extended_decoders() {
@@ -624,6 +1153,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "alloc")]
     #[test]
     fn extended_decode_rejects_misplaced_or_partial_padding() {
         for (name, decode) in extended_decoders() {
@@ -642,6 +1172,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "alloc")]
     #[test]
     fn decoders_reject_every_non_alphabet_byte_in_any_frame() {
         fn assert_invalid_bytes_rejected(name: &str, decode: Decode, alphabet: &[u8]) {

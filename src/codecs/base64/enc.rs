@@ -6,10 +6,13 @@
 //! `+` and `/`; both variants retain RFC 4648 end padding.
 //!
 //! ```rust
-//! use b2t_codecs::base64::{encode_base64_string, encode_base64url_string};
+//! use b2t_codecs::base64::{try_encode_into_base64, try_encode_into_base64url};
 //!
-//! assert_eq!(encode_base64_string(&[0xfb, 0xff]), "+/8=");
-//! assert_eq!(encode_base64url_string(&[0xfb, 0xff]), "-_8=");
+//! let mut base64 = [0; 4];
+//! let mut base64url = [0; 4];
+//!
+//! assert_eq!(try_encode_into_base64(&[0xfb, 0xff], &mut base64), Some(b"+/8=".as_slice()));
+//! assert_eq!(try_encode_into_base64url(&[0xfb, 0xff], &mut base64url), Some(b"-_8=".as_slice()));
 //! ```
 use super::BASE64_PAD;
 
@@ -30,10 +33,11 @@ use alloc::{boxed::Box, string::String, vec::Vec};
 /// # Panics
 ///
 /// Panics if the encoded length cannot be represented as a [`usize`].
+#[cfg(feature = "alloc")]
 #[must_use = "the encoded value should be used"]
 #[inline]
 pub fn encode_base64_string(bytes: &[u8]) -> String {
-    BASE64_RFC.encode_base64_string(bytes)
+    BASE64_RFC.encode_string(bytes)
 }
 
 /// Encodes `bytes` as a canonical padded Base64URL string.
@@ -41,10 +45,11 @@ pub fn encode_base64_string(bytes: &[u8]) -> String {
 /// # Panics
 ///
 /// Panics if the encoded length cannot be represented as a [`usize`].
+#[cfg(feature = "alloc")]
 #[must_use = "the encoded value should be used"]
 #[inline]
 pub fn encode_base64url_string(bytes: &[u8]) -> String {
-    BASE64_URL.encode_base64_string(bytes)
+    BASE64_URL.encode_string(bytes)
 }
 
 /// Encodes `bytes` as canonical padded Base64 ASCII bytes.
@@ -52,10 +57,11 @@ pub fn encode_base64url_string(bytes: &[u8]) -> String {
 /// # Panics
 ///
 /// Panics if the encoded length cannot be represented as a [`usize`].
+#[cfg(feature = "alloc")]
 #[must_use = "the encoded value should be used"]
 #[inline]
 pub fn encode_base64(bytes: &[u8]) -> Box<[u8]> {
-    BASE64_RFC.encode_base64(bytes)
+    BASE64_RFC.encode_boxed(bytes)
 }
 
 /// Encodes `bytes` as canonical padded Base64URL ASCII bytes.
@@ -63,10 +69,61 @@ pub fn encode_base64(bytes: &[u8]) -> Box<[u8]> {
 /// # Panics
 ///
 /// Panics if the encoded length cannot be represented as a [`usize`].
+#[cfg(feature = "alloc")]
 #[must_use = "the encoded value should be used"]
 #[inline]
 pub fn encode_base64url(bytes: &[u8]) -> Box<[u8]> {
-    BASE64_URL.encode_base64(bytes)
+    BASE64_URL.encode_boxed(bytes)
+}
+
+/// Returns the exact number of bytes needed to encode `bytes` as padded Base64.
+///
+/// Base64 emits four ASCII bytes for every complete or partial three-byte
+/// input quantum.
+///
+/// # Panics
+///
+/// Panics if the encoded length cannot be represented as a [`usize`].
+#[must_use = "the encoded size should be used"]
+#[inline]
+pub fn encoded_length_base64(bytes: &[u8]) -> usize {
+    bytes
+        .len()
+        .div_ceil(3)
+        .checked_mul(4)
+        .expect("base64 encoded length overflow")
+}
+
+/// Encodes `src` as canonical padded Base64 into the beginning of `dst`.
+///
+/// Returns the initialized prefix of `dst`, or [`None`] if `dst` is shorter
+/// than [`encoded_length_base64(src)`](encoded_length_base64). A short
+/// destination is left unchanged. Any bytes after the encoded prefix are also
+/// left unchanged. This function does not allocate.
+///
+/// # Panics
+///
+/// Panics if the encoded length cannot be represented as a [`usize`].
+#[must_use = "the encoding result should be handled"]
+#[inline]
+pub fn try_encode_into_base64<'a>(src: &[u8], dst: &'a mut [u8]) -> Option<&'a [u8]> {
+    BASE64_RFC.encode_into(src, dst)
+}
+
+/// Encodes `src` as canonical padded Base64URL into the beginning of `dst`.
+///
+/// Returns the initialized prefix of `dst`, or [`None`] if `dst` is shorter
+/// than [`encoded_length_base64(src)`](encoded_length_base64). A short
+/// destination is left unchanged. Any bytes after the encoded prefix are also
+/// left unchanged. This function does not allocate.
+///
+/// # Panics
+///
+/// Panics if the encoded length cannot be represented as a [`usize`].
+#[must_use = "the encoding result should be handled"]
+#[inline]
+pub fn try_encode_into_base64url<'a>(src: &[u8], dst: &'a mut [u8]) -> Option<&'a [u8]> {
+    BASE64_URL.encode_into(src, dst)
 }
 
 struct Encoder<'e> {
@@ -82,40 +139,79 @@ impl<'e> Encoder<'e> {
         Self { encoder }
     }
 
+    #[cfg(feature = "alloc")]
     #[inline]
-    fn encode_base64_string(&self, bytes: &[u8]) -> String {
-        let enc = self.encode_base64(bytes);
-        // SAFETY: base64 bytes are ASCII, therefore always valid UTF-8
-        unsafe { String::from_utf8_unchecked(enc.into_vec()) }
+    fn encode_string(&self, bytes: &[u8]) -> String {
+        let encoded = self.encode_boxed(bytes);
+        // SAFETY: base64 bytes are ASCII, therefore always valid UTF-8.
+        unsafe { String::from_utf8_unchecked(encoded.into_vec()) }
     }
 
-    fn encode_base64(&self, bytes: &[u8]) -> Box<[u8]> {
+    #[cfg(feature = "alloc")]
+    fn encode_boxed(&self, bytes: &[u8]) -> Box<[u8]> {
         if bytes.is_empty() {
             return Vec::<u8>::new().into_boxed_slice();
         }
 
-        // base64 encodes four ASCII bytes per three byte chunks
-        // and at most four extra bytes for a padded tail
-        let capacity = bytes
-            .len()
-            .checked_mul(4)
-            .expect("base64 encoded length overflow")
-            / 3
-            + 4;
+        let payload_len = encoded_length_base64(bytes);
+        let mut dst = Box::<[u8]>::new_uninit_slice(payload_len);
 
-        let (chunks, remainder) = bytes.as_chunks::<3>();
-        let mut ret = Vec::<u8>::with_capacity(capacity);
+        let (chunks, rem) = bytes.as_chunks::<3>();
+        let mut written = 0usize;
 
         for &chunk in chunks {
-            ret.extend_from_slice(&self.encode_base64_full_chunk(chunk));
+            let chunk = self.encode_base64_full_chunk(chunk);
+            dst[written..written + 4].write_copy_of_slice(&chunk);
+            written += 4;
         }
 
-        if !remainder.is_empty() {
-            let chunk = self.encode_base64_tail(remainder);
-            ret.extend_from_slice(&chunk);
+        if !rem.is_empty() {
+            let chunk = self.encode_base64_tail(rem);
+            dst[written..written + 4].write_copy_of_slice(&chunk);
+            written += 4;
         }
 
-        ret.into_boxed_slice()
+        // SAFETY:
+        //  - `dst` contains `payload_len` consecutive `MaybeUninit<u8>` values.
+        //  - A `MaybeUninit<u8>` pointer is valid for writes through a `u8`
+        //    pointer.
+        //  - initialized exactly `payload_len` bytes.
+        unsafe {
+            // INVARIANT: all allocated elements were initialized.
+            assert!(written == dst.len());
+            dst.assume_init()
+        }
+    }
+
+    fn encode_into<'a>(&self, src: &[u8], dst: &'a mut [u8]) -> Option<&'a [u8]> {
+        if src.is_empty() {
+            return Some(&dst[..0]);
+        }
+
+        let payload_len = encoded_length_base64(src);
+        if dst.len() < payload_len {
+            return None;
+        }
+
+        let (chunks, rem) = src.as_chunks::<3>();
+        let mut written = 0usize;
+
+        for &chunk in chunks {
+            let chunk = self.encode_base64_full_chunk(chunk);
+            dst[written..written + 4].copy_from_slice(&chunk);
+            written += 4;
+        }
+
+        if !rem.is_empty() {
+            let chunk = self.encode_base64_tail(rem);
+            dst[written..written + 4].copy_from_slice(&chunk);
+            written += 4;
+        }
+
+        // INVARIANT: `written == encoded_length_base64(src)`, therefore
+        // `written <= dst.len()`.
+        assert!(written == payload_len);
+        Some(&dst[..payload_len])
     }
 
     fn encode_base64_full_chunk(&self, chunk: [u8; 3]) -> [u8; 4] {
@@ -165,7 +261,9 @@ impl<'e> Encoder<'e> {
 mod tests {
     use super::*;
 
+    #[cfg(feature = "alloc")]
     type EncodeBytes = fn(&[u8]) -> Box<[u8]>;
+    #[cfg(feature = "alloc")]
     type EncodeString = fn(&[u8]) -> String;
 
     #[test]
@@ -181,13 +279,27 @@ mod tests {
         ];
 
         for &(plain, base64) in vectors {
-            assert_eq!(encode_base64(plain).as_ref(), base64.as_bytes());
-            assert_eq!(encode_base64_string(plain), base64);
+            let mut dst = [0u8; 8];
+            assert_eq!(
+                try_encode_into_base64(plain, &mut dst),
+                Some(base64.as_bytes())
+            );
 
             // These RFC vectors do not use alphabet digits 62 or 63, so their
             // Base64 and Base64URL encodings are identical.
-            assert_eq!(encode_base64url(plain).as_ref(), base64.as_bytes());
-            assert_eq!(encode_base64url_string(plain), base64);
+            let mut dst = [0u8; 8];
+            assert_eq!(
+                try_encode_into_base64url(plain, &mut dst),
+                Some(base64.as_bytes())
+            );
+
+            #[cfg(feature = "alloc")]
+            {
+                assert_eq!(encode_base64(plain).as_ref(), base64.as_bytes());
+                assert_eq!(encode_base64_string(plain), base64);
+                assert_eq!(encode_base64url(plain).as_ref(), base64.as_bytes());
+                assert_eq!(encode_base64url_string(plain), base64);
+            }
         }
     }
 
@@ -200,11 +312,74 @@ mod tests {
         ];
 
         for &(plain, base64, base64url) in vectors {
-            assert_eq!(encode_base64(plain).as_ref(), base64.as_bytes());
-            assert_eq!(encode_base64_string(plain), base64);
-            assert_eq!(encode_base64url(plain).as_ref(), base64url.as_bytes());
-            assert_eq!(encode_base64url_string(plain), base64url);
+            let mut dst = [0u8; 4];
+            assert_eq!(
+                try_encode_into_base64(plain, &mut dst),
+                Some(base64.as_bytes())
+            );
+
+            let mut dst = [0u8; 4];
+            assert_eq!(
+                try_encode_into_base64url(plain, &mut dst),
+                Some(base64url.as_bytes())
+            );
+
+            #[cfg(feature = "alloc")]
+            {
+                assert_eq!(encode_base64(plain).as_ref(), base64.as_bytes());
+                assert_eq!(encode_base64_string(plain), base64);
+                assert_eq!(encode_base64url(plain).as_ref(), base64url.as_bytes());
+                assert_eq!(encode_base64url_string(plain), base64url);
+            }
         }
+    }
+
+    #[test]
+    fn encoded_lengths_are_exact() {
+        assert_eq!(encoded_length_base64(b""), 0);
+        assert_eq!(encoded_length_base64(&[0]), 4);
+        assert_eq!(encoded_length_base64(&[0; 2]), 4);
+        assert_eq!(encoded_length_base64(&[0; 3]), 4);
+        assert_eq!(encoded_length_base64(&[0; 4]), 8);
+        assert_eq!(encoded_length_base64(&[0; 32]), 44);
+    }
+
+    #[test]
+    fn slice_encoders_write_only_the_returned_prefix() {
+        let mut base64 = [b'!'; 6];
+        assert_eq!(
+            try_encode_into_base64(&[0xfb, 0xff], &mut base64),
+            Some(b"+/8=".as_slice()),
+        );
+        assert_eq!(&base64[4..], b"!!");
+
+        let mut base64url = [b'?'; 6];
+        assert_eq!(
+            try_encode_into_base64url(&[0xfb, 0xff], &mut base64url),
+            Some(b"-_8=".as_slice()),
+        );
+        assert_eq!(&base64url[4..], b"??");
+
+        let mut untouched = [b'x'; 1];
+        let dst_ptr = untouched.as_ptr();
+        let encoded = try_encode_into_base64(b"", &mut untouched).unwrap();
+        assert!(encoded.is_empty());
+        assert_eq!(encoded.as_ptr(), dst_ptr);
+        assert_eq!(untouched, [b'x']);
+    }
+
+    #[test]
+    fn slice_encoders_return_none_for_a_short_destination() {
+        let mut base64 = [b'!'; 3];
+        assert_eq!(try_encode_into_base64(&[0xfb, 0xff], &mut base64), None);
+        assert_eq!(base64, [b'!'; 3]);
+
+        let mut base64url = [b'?'; 3];
+        assert_eq!(
+            try_encode_into_base64url(&[0xfb, 0xff], &mut base64url),
+            None,
+        );
+        assert_eq!(base64url, [b'?'; 3]);
     }
 
     #[test]
@@ -224,6 +399,7 @@ mod tests {
         assert_invariants(&BASE64_URL);
     }
 
+    #[cfg(feature = "alloc")]
     #[test]
     fn byte_slices_of_arbitrary_lengths_encode_canonically() {
         let codecs: &[(&str, EncodeBytes, EncodeString, &[u8])] = &[
