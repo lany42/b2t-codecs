@@ -29,7 +29,7 @@ assert_eq!(decoded, Some(b"Rust is great!".as_slice()));
 - [x] No-alloc API for Base16, v2.0
 - [x] No-alloc API for Base32, v2.1
 - [x] No-alloc API for Base64, v2.2
-- [ ] No-alloc API for Base85, v2.3
+- [x] No-alloc API for Base85, v2.3
 
 ## Codecs
 

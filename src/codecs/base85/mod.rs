@@ -9,14 +9,30 @@
 //! traditional `<~` and `~>` delimiters, decoders do not accept them, and
 //! decoders ignore ASCII whitespace within payloads.
 //!
+//! [`encoded_length_base85`] and [`decoded_length_base85`] provide exact sizes
+//! for structurally aligned strict Ascii85 and Z85 input. Adobe85 encoding uses
+//! the content-independent [`encoded_length_adobe85`] upper bound because `z`
+//! compression can shorten the initialized output. There is deliberately no
+//! Adobe85 decoded-length helper: [`try_decode_from_adobe85`] decodes in one
+//! pass and checks destination capacity as it emits.
+//!
+//! Encoders and strict decoders reject short destinations before writing;
+//! invalid strict symbols can still leave a sufficiently large destination
+//! partially modified. Adobe85 decoding instead has a streaming failure
+//! contract: after malformed input or insufficient capacity, callers must
+//! discard the entire destination. Every successful slice API leaves bytes
+//! after its returned prefix unchanged.
+//!
 //! ```rust
-//! use b2t_codecs::base85::{try_decode_z85_string, try_encode_z85_string};
+//! use b2t_codecs::base85::{try_decode_from_z85, try_encode_into_z85};
 //!
-//! let encoded = try_encode_z85_string(b"Hello,World!").unwrap();
-//! assert_eq!(encoded, "nm=QNz.a$dA+]nf");
+//! let mut encoded = [0; 15];
+//! let mut decoded = [0; 12];
+//! let encoded = try_encode_into_z85(b"Hello,World!", &mut encoded).unwrap();
+//! let decoded = try_decode_from_z85(encoded, &mut decoded);
 //!
-//! let decoded = &*try_decode_z85_string(&encoded).unwrap();
-//! assert_eq!(decoded, b"Hello,World!");
+//! assert_eq!(encoded, b"nm=QNz.a$dA+]nf");
+//! assert_eq!(decoded, Some(b"Hello,World!".as_slice()));
 //! ```
 // BASE85 CODEC
 // Base85 encoding and decoding shared by the ASCII85, Adobe85, and Z85 APIs.
@@ -30,12 +46,21 @@ mod dec;
 mod enc;
 
 pub use dec::{
+    decoded_length_base85, try_decode_from_adobe85, try_decode_from_ascii85, try_decode_from_z85,
+};
+#[cfg(feature = "alloc")]
+pub use dec::{
     try_decode_adobe85, try_decode_adobe85_string, try_decode_ascii85, try_decode_ascii85_string,
     try_decode_z85, try_decode_z85_string,
 };
+#[cfg(feature = "alloc")]
 pub use enc::{
     encode_adobe85, encode_adobe85_string, try_encode_ascii85, try_encode_ascii85_string,
     try_encode_z85, try_encode_z85_string,
+};
+pub use enc::{
+    encoded_length_adobe85, encoded_length_base85, try_encode_into_adobe85,
+    try_encode_into_ascii85, try_encode_into_z85,
 };
 
 #[cfg(feature = "alloc")]
@@ -103,13 +128,32 @@ mod sealed {
 /// Encodings are raw payloads without `<~` and `~>` delimiters. Decoding
 /// ignores ASCII whitespace within payloads and does not accept delimiters.
 pub trait Adobe85: sealed::Sealed + Copy {
+    /// The fixed width of this integer type in decoded bytes.
+    ///
+    /// [`encoded_length_adobe85`] returns the destination capacity required by
+    /// this type's full-width encoding. The returned encoded prefix can be
+    /// shorter when a full zero quantum is compressed as `z`.
+    const SIZE: usize;
+
     /// Returns the Adobe85 encoding of this value.
+    #[cfg(feature = "alloc")]
     #[must_use = "the encoded value should be used"]
     fn as_adobe85_string(&self) -> String;
 
     /// Returns the Adobe85 ASCII bytes for this value.
+    #[cfg(feature = "alloc")]
     #[must_use = "the encoded value should be used"]
     fn as_adobe85(&self) -> Box<[u8]>;
+
+    /// Encodes this value as full-width Adobe85 into `dst`.
+    ///
+    /// `dst` must be at least [`encoded_length_adobe85`] bytes for this value's
+    /// full decoded width, even when `z` compression makes the returned prefix
+    /// shorter. A short destination is left unchanged, and bytes after a
+    /// successful returned prefix are also left unchanged. This method does
+    /// not allocate.
+    #[must_use = "the encoding result should be handled"]
+    fn try_as_adobe85_into<'a>(&self, dst: &'a mut [u8]) -> Option<&'a [u8]>;
 
     /// Decodes an Adobe85 string into a value of exactly this type's width.
     ///
@@ -131,13 +175,30 @@ pub trait Adobe85: sealed::Sealed + Copy {
 /// This sealed trait is implemented for `u32`, `u64`, `u128`, `i32`, `i64`,
 /// and `i128`. Values use their big-endian byte representation.
 pub trait Z85: sealed::Sealed + Copy {
+    /// The fixed width of this integer type in decoded bytes.
+    ///
+    /// Its full-width Z85 representation contains exactly
+    /// `(Self::SIZE / 4) * 5` ASCII bytes.
+    const SIZE: usize;
+
     /// Returns the Z85 encoding of this value.
+    #[cfg(feature = "alloc")]
     #[must_use = "the encoded value should be used"]
     fn as_z85_string(&self) -> String;
 
     /// Returns the Z85 ASCII bytes for this value.
+    #[cfg(feature = "alloc")]
     #[must_use = "the encoded value should be used"]
     fn as_z85(&self) -> Box<[u8]>;
+
+    /// Encodes this value as full-width Z85 into `dst`.
+    ///
+    /// Returns the initialized prefix of `dst`, or [`None`] if `dst` is shorter
+    /// than `(Self::SIZE / 4) * 5`. A short destination is left unchanged, and
+    /// bytes after a successful returned prefix are also left unchanged. This
+    /// method does not allocate.
+    #[must_use = "the encoding result should be handled"]
+    fn try_as_z85_into<'a>(&self, dst: &'a mut [u8]) -> Option<&'a [u8]>;
 
     /// Decodes a Z85 string into a value of exactly this type's width.
     ///
@@ -160,13 +221,30 @@ pub trait Z85: sealed::Sealed + Copy {
 /// [`Adobe85`], this format does not compress zero quanta or accept partial
 /// quanta.
 pub trait Base85: sealed::Sealed + Copy {
+    /// The fixed width of this integer type in decoded bytes.
+    ///
+    /// Its full-width strict Ascii85 representation contains exactly
+    /// `(Self::SIZE / 4) * 5` ASCII bytes.
+    const SIZE: usize;
+
     /// Returns the strict Ascii85 encoding of this value.
+    #[cfg(feature = "alloc")]
     #[must_use = "the encoded value should be used"]
     fn as_base85_string(&self) -> String;
 
     /// Returns the strict Ascii85 bytes for this value.
+    #[cfg(feature = "alloc")]
     #[must_use = "the encoded value should be used"]
     fn as_base85(&self) -> Box<[u8]>;
+
+    /// Encodes this value as full-width strict Ascii85 into `dst`.
+    ///
+    /// Returns the initialized prefix of `dst`, or [`None`] if `dst` is shorter
+    /// than `(Self::SIZE / 4) * 5`. A short destination is left unchanged, and
+    /// bytes after a successful returned prefix are also left unchanged. This
+    /// method does not allocate.
+    #[must_use = "the encoding result should be handled"]
+    fn try_as_base85_into<'a>(&self, dst: &'a mut [u8]) -> Option<&'a [u8]>;
 
     /// Decodes a strict Ascii85 string into a value of this type's exact width.
     ///
@@ -186,16 +264,25 @@ macro_rules! impl_base85 {
     ($($ty:ty),+ $(,)?) => {
         $(
             impl Base85 for $ty {
+                const SIZE: usize = core::mem::size_of::<$ty>();
+
+                #[cfg(feature = "alloc")]
                 #[inline]
                 fn as_base85_string(&self) -> String {
                     try_encode_ascii85_string(&self.to_be_bytes())
                         .expect("Base85 trait implementations require four-byte-aligned widths")
                 }
 
+                #[cfg(feature = "alloc")]
                 #[inline]
                 fn as_base85(&self) -> Box<[u8]> {
                     try_encode_ascii85(&self.to_be_bytes())
                         .expect("Base85 trait implementations require four-byte-aligned widths")
+                }
+
+                #[inline]
+                fn try_as_base85_into<'a>(&self, dst: &'a mut [u8]) -> Option<&'a [u8]> {
+                    try_encode_into_ascii85(&self.to_be_bytes(), dst)
                 }
 
                 #[inline]
@@ -205,35 +292,40 @@ macro_rules! impl_base85 {
 
                 #[inline]
                 fn try_from_base85(base85: &[u8]) -> Option<Self> {
-                    // INVARIANT: base85 encodes five ASCII per four bytes
-                    // ex.  u32/i32     -> 5 ASCII
-                    //      u64/i64     -> 10 ASCII
-                    //      u128/i128   -> 20 ASCII
-                    const SIZE: usize = core::mem::size_of::<$ty>() * 5 / 4;
-                    if base85.len() != SIZE {
+                    if decoded_length_base85(base85)? != <Self as Base85>::SIZE {
                         return None;
                     }
 
-                    if let Some(bytes) = try_decode_ascii85(base85) {
-                        let bytes = bytes.as_ref().try_into().ok()?;
-                        return Some(Self::from_be_bytes(bytes));
+                    let mut dst = [0u8; core::mem::size_of::<$ty>()];
+                    let written = try_decode_from_ascii85(base85, &mut dst)?.len();
+                    if written != <Self as Base85>::SIZE {
+                        return None;
                     }
 
-                    None
+                    Some(Self::from_be_bytes(dst))
                 }
             }
 
             impl Z85 for $ty {
+                const SIZE: usize = core::mem::size_of::<$ty>();
+
+                #[cfg(feature = "alloc")]
                 #[inline]
                 fn as_z85_string(&self) -> String {
                     try_encode_z85_string(&self.to_be_bytes())
                         .expect("Z85 trait implementations require four-byte-aligned widths")
                 }
 
+                #[cfg(feature = "alloc")]
                 #[inline]
                 fn as_z85(&self) -> Box<[u8]> {
                     try_encode_z85(&self.to_be_bytes())
                         .expect("Z85 trait implementations require four-byte-aligned widths")
+                }
+
+                #[inline]
+                fn try_as_z85_into<'a>(&self, dst: &'a mut [u8]) -> Option<&'a [u8]> {
+                    try_encode_into_z85(&self.to_be_bytes(), dst)
                 }
 
                 #[inline]
@@ -243,21 +335,17 @@ macro_rules! impl_base85 {
 
                 #[inline]
                 fn try_from_z85(z85: &[u8]) -> Option<Self> {
-                    // INVARIANT: base85 encodes five ASCII per four bytes
-                    // ex.  u32/i32     -> 5 ASCII
-                    //      u64/i64     -> 10 ASCII
-                    //      u128/i128   -> 20 ASCII
-                    const SIZE: usize = core::mem::size_of::<$ty>() * 5 / 4;
-                    if z85.len() != SIZE {
+                    if decoded_length_base85(z85)? != <Self as Z85>::SIZE {
                         return None;
                     }
 
-                    if let Some(bytes) = try_decode_z85(z85) {
-                        let bytes = bytes.as_ref().try_into().ok()?;
-                        return Some(Self::from_be_bytes(bytes));
+                    let mut dst = [0u8; core::mem::size_of::<$ty>()];
+                    let written = try_decode_from_z85(z85, &mut dst)?.len();
+                    if written != <Self as Z85>::SIZE {
+                        return None;
                     }
 
-                    None
+                    Some(Self::from_be_bytes(dst))
                 }
             }
         )+
@@ -270,14 +358,23 @@ macro_rules! impl_adobe85 {
             impl sealed::Sealed for $ty {}
 
             impl Adobe85 for $ty {
+                const SIZE: usize = core::mem::size_of::<$ty>();
+
+                #[cfg(feature = "alloc")]
                 #[inline]
                 fn as_adobe85_string(&self) -> String {
                     encode_adobe85_string(&self.to_be_bytes())
                 }
 
+                #[cfg(feature = "alloc")]
                 #[inline]
                 fn as_adobe85(&self) -> Box<[u8]> {
                     encode_adobe85(&self.to_be_bytes())
+                }
+
+                #[inline]
+                fn try_as_adobe85_into<'a>(&self, dst: &'a mut [u8]) -> Option<&'a [u8]> {
+                    try_encode_into_adobe85(&self.to_be_bytes(), dst)
                 }
 
                 #[inline]
@@ -287,17 +384,13 @@ macro_rules! impl_adobe85 {
 
                 #[inline]
                 fn try_from_adobe85(adobe85: &[u8]) -> Option<Self> {
-                    if let Some(bytes) = try_decode_adobe85(adobe85) {
-                        const SIZE: usize = core::mem::size_of::<$ty>();
-                        if bytes.len() != SIZE {
-                            return None;
-                        }
-
-                        let bytes = bytes.as_ref().try_into().ok()?;
-                        return Some(Self::from_be_bytes(bytes));
+                    let mut dst = [0u8; core::mem::size_of::<$ty>()];
+                    let written = try_decode_from_adobe85(adobe85, &mut dst)?.len();
+                    if written != <Self as Adobe85>::SIZE {
+                        return None;
                     }
 
-                    None
+                    Some(Self::from_be_bytes(dst))
                 }
             }
         )+
@@ -311,7 +404,7 @@ impl_adobe85!(u8, u16, u32, u64, u128, i8, i16, i32, i64, i128);
 // "It is up to the application to ensure that frames and strings are padded if necessary."
 impl_base85!(u32, u64, u128, i32, i64, i128);
 
-#[cfg(test)]
+#[cfg(all(test, feature = "alloc"))]
 mod tests {
     use super::*;
     use alloc::fmt::Debug;

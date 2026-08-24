@@ -31,7 +31,7 @@
 //! - [x] No-alloc API for Base16, v2.0
 //! - [x] No-alloc API for Base32, v2.1
 //! - [x] No-alloc API for Base64, v2.2
-//! - [ ] No-alloc API for Base85, v2.3
+//! - [x] No-alloc API for Base85, v2.3
 //!
 //! ## Codecs
 //!
@@ -120,12 +120,15 @@ pub use codecs::base64::{
     try_decode_base64ext_string, try_decode_base64url, try_decode_base64url_string,
     try_decode_base64urlext, try_decode_base64urlext_string,
 };
-#[cfg(feature = "alloc")]
 pub use codecs::base85;
+pub use codecs::base85::{
+    Adobe85, Base85, Z85, decoded_length_base85, encoded_length_adobe85, encoded_length_base85,
+    try_decode_from_adobe85, try_decode_from_ascii85, try_decode_from_z85, try_encode_into_adobe85,
+    try_encode_into_ascii85, try_encode_into_z85,
+};
 #[cfg(feature = "alloc")]
 pub use codecs::base85::{
-    Adobe85, Base85, Z85, encode_adobe85, encode_adobe85_string, try_decode_adobe85,
-    try_decode_adobe85_string, try_decode_ascii85, try_decode_ascii85_string, try_decode_z85,
-    try_decode_z85_string, try_encode_ascii85, try_encode_ascii85_string, try_encode_z85,
-    try_encode_z85_string,
+    encode_adobe85, encode_adobe85_string, try_decode_adobe85, try_decode_adobe85_string,
+    try_decode_ascii85, try_decode_ascii85_string, try_decode_z85, try_decode_z85_string,
+    try_encode_ascii85, try_encode_ascii85_string, try_encode_z85, try_encode_z85_string,
 };
