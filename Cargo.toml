@@ -8,7 +8,7 @@ readme = "README.md"
 repository = "https://git.colorized.life/b2t-codecs"
 keywords = ["no_std", "base16", "base32", "base64", "z85"]
 categories = ["encoding"]
-exclude = ["/scripts", "/.gitignore"]
+exclude = ["/.github", "/scripts", "/.gitignore"]
 
 [package.metadata.docs.rs]
 all-features = true
