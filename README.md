@@ -1,5 +1,7 @@
 # b2t-codecs
 
+The canonical home of this repository is at https://git.colorized.life/b2t-codecs/
+
 Freestanding binary-to-text codecs for Base16, Base32, Base64, and Base85.
 
 The `alloc` feature is enabled by default. To use only allocation-free APIs,
