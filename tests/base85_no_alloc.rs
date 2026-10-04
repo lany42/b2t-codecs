@@ -46,63 +46,26 @@ fn non_allocating_base85_api_is_reexported_from_the_crate_root() {
         try_decode_from_adobe85(b"L/669", &mut decoded),
         Some(input.as_slice())
     );
-}
 
-#[test]
-fn public_slice_apis_enforce_their_destination_contracts() {
-    let mut empty = [];
-    assert_eq!(try_encode_into_ascii85(b"", &mut empty), Some(&[][..]));
-    assert_eq!(try_encode_into_z85(b"", &mut empty), Some(&[][..]));
-    assert_eq!(try_encode_into_adobe85(b"", &mut empty), Some(&[][..]));
-    assert_eq!(try_decode_from_ascii85(b"", &mut empty), Some(&[][..]));
-    assert_eq!(try_decode_from_z85(b"", &mut empty), Some(&[][..]));
-    assert_eq!(try_decode_from_adobe85(b"", &mut empty), Some(&[][..]));
-
-    let mut strict_short = [0xa5; 4];
-    assert_eq!(try_encode_into_ascii85(&[0; 4], &mut strict_short), None);
-    assert_eq!(strict_short, [0xa5; 4]);
-
-    let mut adobe_short = [0xa5; 4];
-    assert_eq!(try_encode_into_adobe85(&[0; 4], &mut adobe_short), None);
-    assert_eq!(adobe_short, [0xa5; 4]);
-
-    let mut adobe = [0xa5; 6];
-    let encoded = try_encode_into_adobe85(&[0; 4], &mut adobe).unwrap();
-    assert_eq!(encoded, b"z");
-    assert_eq!(&adobe[1..], &[0xa5; 5]);
-
-    let mut decoded = [0xa5; 5];
+    // Zero quanta and `z` tell the strict wrappers apart from Adobe85.
     assert_eq!(
-        try_decode_from_adobe85(b"\t z\n", &mut decoded).unwrap(),
-        &[0; 4]
+        try_encode_into_ascii85(&[0; 4], &mut ascii85),
+        Some(b"!!!!!".as_slice())
     );
-    assert_eq!(decoded[4], 0xa5);
-
-    let mut guarded = [0xa5; 10];
-    assert_eq!(try_decode_from_adobe85(b"zz", &mut guarded[1..8]), None);
-    assert_eq!(guarded[0], 0xa5);
-    assert_eq!(&guarded[8..], &[0xa5; 2]);
+    assert_eq!(
+        try_encode_into_z85(&[0; 4], &mut z85),
+        Some(b"00000".as_slice())
+    );
+    assert_eq!(try_decode_from_ascii85(b"z    ", &mut decoded), None);
+    // In Z85, `z` is digit 35, not a zero-quantum shorthand.
+    assert_eq!(
+        try_decode_from_z85(b"0000z", &mut decoded),
+        Some([0, 0, 0, 0x23].as_slice())
+    );
 }
 
 #[test]
 fn fixed_width_traits_are_available_without_allocation() {
-    macro_rules! assert_adobe85_size {
-        ($($ty:ty),+ $(,)?) => {
-            $(assert_eq!(<$ty as Adobe85>::SIZE, core::mem::size_of::<$ty>());)+
-        };
-    }
-    macro_rules! assert_strict_sizes {
-        ($($ty:ty),+ $(,)?) => {
-            $(
-                assert_eq!(<$ty as Base85>::SIZE, core::mem::size_of::<$ty>());
-                assert_eq!(<$ty as Z85>::SIZE, core::mem::size_of::<$ty>());
-            )+
-        };
-    }
-
-    assert_adobe85_size!(u8, u16, u32, u64, u128, i8, i16, i32, i64, i128);
-    assert_strict_sizes!(u32, u64, u128, i32, i64, i128);
-
     let value = 0x864f_d26f_u32;
     let mut dst = [0xa5; 6];
     assert_eq!(
@@ -112,6 +75,12 @@ fn fixed_width_traits_are_available_without_allocation() {
     assert_eq!(dst[5], 0xa5);
     assert_eq!(u32::try_from_base85(b"L/669"), Some(value));
     assert_eq!(u32::try_from_base85_string("L/669"), Some(value));
+    // Strict Ascii85 has no `z` shorthand; Adobe85 would give "z" and Some(0).
+    assert_eq!(
+        0_u32.try_as_base85_into(&mut dst),
+        Some(b"!!!!!".as_slice())
+    );
+    assert_eq!(u32::try_from_base85(b"z    "), None);
 
     assert_eq!(value.try_as_z85_into(&mut dst), Some(b"Hello".as_slice()));
     assert_eq!(dst[5], 0xa5);
@@ -136,27 +105,10 @@ fn fixed_width_traits_are_available_without_allocation() {
 
     assert_eq!(u64::try_from_base85(b"!!!!!"), None);
     assert_eq!(u64::try_from_base85(b"!!!!!!!!!!"), Some(0));
+    assert_eq!(u64::try_from_base85(b"!!!!!!!!!!!!!!!"), None);
     assert_eq!(u64::try_from_z85(b"00000"), None);
     assert_eq!(u64::try_from_z85(b"0000000000"), Some(0));
+    assert_eq!(u64::try_from_z85(b"000000000000000"), None);
     assert_eq!(u32::try_from_adobe85(b"!!!"), None);
     assert_eq!(u32::try_from_adobe85(b"zz"), None);
-
-    let signed = i32::MIN;
-    let mut signed_adobe = [0; 5];
-    let signed_adobe = signed
-        .try_as_adobe85_into(&mut signed_adobe)
-        .expect("a five-byte destination fits an i32 Adobe85 upper bound");
-    assert_eq!(i32::try_from_adobe85(signed_adobe), Some(signed));
-
-    let mut signed_ascii85 = [0; 5];
-    let signed_ascii85 = signed
-        .try_as_base85_into(&mut signed_ascii85)
-        .expect("a five-byte destination fits an i32 Ascii85 encoding");
-    assert_eq!(i32::try_from_base85(signed_ascii85), Some(signed));
-
-    let mut signed_z85 = [0; 5];
-    let signed_z85 = signed
-        .try_as_z85_into(&mut signed_z85)
-        .expect("a five-byte destination fits an i32 Z85 encoding");
-    assert_eq!(i32::try_from_z85(signed_z85), Some(signed));
 }

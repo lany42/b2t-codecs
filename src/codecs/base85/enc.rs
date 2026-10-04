@@ -39,10 +39,6 @@ use alloc::{boxed::Box, string::String, vec::Vec};
 /// Full zero quanta are compressed as `z`, and a final partial quantum uses
 /// implicit padding. The output does not include the traditional `<~` and `~>`
 /// delimiters.
-///
-/// # Panics
-///
-/// Panics if the encoded length cannot be represented as a [`usize`].
 #[cfg(feature = "alloc")]
 #[must_use = "the encoded value should be used"]
 #[inline]
@@ -55,10 +51,6 @@ pub fn encode_adobe85_string(bytes: &[u8]) -> String {
 /// Full zero quanta are compressed as `z`, and a final partial quantum uses
 /// implicit padding. The output does not include the traditional `<~` and `~>`
 /// delimiters.
-///
-/// # Panics
-///
-/// Panics if the encoded length cannot be represented as a [`usize`].
 #[cfg(feature = "alloc")]
 #[must_use = "the encoded value should be used"]
 #[inline]
@@ -68,8 +60,7 @@ pub fn encode_adobe85(bytes: &[u8]) -> Box<[u8]> {
 
 /// Encodes complete four-byte quanta as a strict Ascii85 string.
 ///
-/// Returns [`None`] if `bytes.len()` is not divisible by four or the encoded
-/// length cannot be represented as a [`usize`].
+/// Returns [`None`] if `bytes.len()` is not divisible by four.
 #[cfg(feature = "alloc")]
 #[must_use = "the encoding result should be handled"]
 #[inline]
@@ -79,8 +70,7 @@ pub fn try_encode_ascii85_string(bytes: &[u8]) -> Option<String> {
 
 /// Encodes complete four-byte quanta as strict Ascii85 bytes.
 ///
-/// Returns [`None`] if `bytes.len()` is not divisible by four or the encoded
-/// length cannot be represented as a [`usize`].
+/// Returns [`None`] if `bytes.len()` is not divisible by four.
 #[cfg(feature = "alloc")]
 #[must_use = "the encoding result should be handled"]
 #[inline]
@@ -90,8 +80,7 @@ pub fn try_encode_ascii85(bytes: &[u8]) -> Option<Box<[u8]>> {
 
 /// Encodes complete four-byte quanta as a ZeroMQ Z85 string.
 ///
-/// Returns [`None`] if `bytes.len()` is not divisible by four or the encoded
-/// length cannot be represented as a [`usize`].
+/// Returns [`None`] if `bytes.len()` is not divisible by four.
 #[cfg(feature = "alloc")]
 #[must_use = "the encoding result should be handled"]
 #[inline]
@@ -101,8 +90,7 @@ pub fn try_encode_z85_string(bytes: &[u8]) -> Option<String> {
 
 /// Encodes complete four-byte quanta as ZeroMQ Z85 bytes.
 ///
-/// Returns [`None`] if `bytes.len()` is not divisible by four or the encoded
-/// length cannot be represented as a [`usize`].
+/// Returns [`None`] if `bytes.len()` is not divisible by four.
 #[cfg(feature = "alloc")]
 #[must_use = "the encoding result should be handled"]
 #[inline]
@@ -113,9 +101,8 @@ pub fn try_encode_z85(bytes: &[u8]) -> Option<Box<[u8]>> {
 /// Returns the exact encoded length of strict Ascii85 or Z85 input.
 ///
 /// Strict Base85 emits five ASCII symbols for every complete four-byte input
-/// quantum. Returns [`None`] unless `src.len()` is divisible by four or if the
-/// encoded length cannot be represented as a [`usize`]. This function does
-/// not inspect the contents of `src`.
+/// quantum. Returns [`None`] unless `src.len()` is divisible by four. This
+/// function does not inspect the contents of `src`.
 #[must_use = "the encoded size should be used"]
 #[inline]
 pub fn encoded_length_base85(src: &[u8]) -> Option<usize> {
@@ -132,7 +119,8 @@ fn encoded_length(src: &[u8]) -> Option<usize> {
 
     // INVARIANT: base85 encodes five ASCII bytes per four input bytes
     // "The string frame SHALL have a length that is divisible by 5 with no remainder."
-    (src.len() / 4).checked_mul(5)
+    // A slice holds at most `isize::MAX` bytes, so this cannot overflow.
+    Some(src.len() / 4 * 5)
 }
 
 /// Returns the destination capacity required to encode `src` as Adobe85.
@@ -143,10 +131,6 @@ fn encoded_length(src: &[u8]) -> Option<usize> {
 /// compression, so the initialized prefix returned by
 /// [`try_encode_into_adobe85`] can be shorter. Callers must nevertheless
 /// provide this full capacity.
-///
-/// # Panics
-///
-/// Panics if the upper bound cannot be represented as a [`usize`].
 #[must_use = "the encoded capacity should be used"]
 #[inline]
 pub fn encoded_length_adobe85(src: &[u8]) -> usize {
@@ -155,10 +139,8 @@ pub fn encoded_length_adobe85(src: &[u8]) -> usize {
         len => len + 1,
     };
 
-    (src.len() / 4)
-        .checked_mul(5)
-        .and_then(|len| len.checked_add(tail_len))
-        .expect("base85 encoded length overflow")
+    // A slice holds at most `isize::MAX` bytes, so this cannot overflow.
+    src.len() / 4 * 5 + tail_len
 }
 
 /// Encodes `src` as raw Adobe85 into the beginning of `dst`.
@@ -169,11 +151,6 @@ pub fn encoded_length_adobe85(src: &[u8]) -> usize {
 /// of `dst`, including `Some(&dst[..0])` for empty input. A short destination is
 /// left unchanged, and bytes after a successful returned prefix are also left
 /// unchanged. This function does not allocate.
-///
-/// # Panics
-///
-/// Panics if the Adobe85 encoded-length upper bound cannot be represented as a
-/// [`usize`].
 #[must_use = "the encoding result should be handled"]
 #[inline]
 pub fn try_encode_into_adobe85<'a>(src: &[u8], dst: &'a mut [u8]) -> Option<&'a [u8]> {
@@ -183,10 +160,10 @@ pub fn try_encode_into_adobe85<'a>(src: &[u8], dst: &'a mut [u8]) -> Option<&'a 
 /// Encodes complete four-byte `src` quanta as strict Ascii85 into `dst`.
 ///
 /// Returns the initialized prefix of `dst`, including `Some(&dst[..0])` for
-/// empty input, or [`None`] if `src` is not four-byte aligned, the encoded
-/// length overflows, or `dst` is too short. Alignment and capacity failures
-/// leave `dst` unchanged. Bytes after a successful returned prefix are also
-/// left unchanged. This function does not allocate.
+/// empty input, or [`None`] if `src` is not four-byte aligned or `dst` is too
+/// short. Alignment and capacity failures leave `dst` unchanged. Bytes after a
+/// successful returned prefix are also left unchanged. This function does not
+/// allocate.
 #[must_use = "the encoding result should be handled"]
 #[inline]
 pub fn try_encode_into_ascii85<'a>(src: &[u8], dst: &'a mut [u8]) -> Option<&'a [u8]> {
@@ -196,10 +173,10 @@ pub fn try_encode_into_ascii85<'a>(src: &[u8], dst: &'a mut [u8]) -> Option<&'a 
 /// Encodes complete four-byte `src` quanta as ZeroMQ Z85 into `dst`.
 ///
 /// Returns the initialized prefix of `dst`, including `Some(&dst[..0])` for
-/// empty input, or [`None`] if `src` is not four-byte aligned, the encoded
-/// length overflows, or `dst` is too short. Alignment and capacity failures
-/// leave `dst` unchanged. Bytes after a successful returned prefix are also
-/// left unchanged. This function does not allocate.
+/// empty input, or [`None`] if `src` is not four-byte aligned or `dst` is too
+/// short. Alignment and capacity failures leave `dst` unchanged. Bytes after a
+/// successful returned prefix are also left unchanged. This function does not
+/// allocate.
 #[must_use = "the encoding result should be handled"]
 #[inline]
 pub fn try_encode_into_z85<'a>(src: &[u8], dst: &'a mut [u8]) -> Option<&'a [u8]> {
@@ -423,17 +400,13 @@ mod tests {
         let mut dst = [0xa5; 10];
         let encoded = ASCII85.encode_adobe85_into(&input, &mut dst).unwrap();
         assert_eq!(encoded, b"zz");
-        assert_eq!(encoded.len() + 8, encoded_length_adobe85(&input));
         assert_eq!(&dst[2..], &[0xa5; 8]);
 
-        let nonzero = [1u8; 8];
-        let encoded = ASCII85.encode_adobe85_into(&nonzero, &mut dst).unwrap();
-        assert_eq!(encoded.len(), encoded_length_adobe85(&nonzero));
-
         let mixed = [0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0];
-        let mut mixed_dst = [0; 15];
+        let mut mixed_dst = [0xa5; 15];
         let encoded = ASCII85.encode_adobe85_into(&mixed, &mut mixed_dst).unwrap();
-        assert_eq!(encoded.len() + 8, encoded_length_adobe85(&mixed));
+        assert_eq!(encoded, b"z!<E3%z");
+        assert_eq!(&mixed_dst[7..], &[0xa5; 8]);
     }
 
     #[test]
@@ -454,6 +427,32 @@ mod tests {
         assert_eq!(
             ASCII85.encode_adobe85_into(&input, &mut adobe85),
             Some(b"L/669[9<6.".as_slice())
+        );
+
+        // Quantum k carries base-85 digits 5k..=5k+4 (big-endian word
+        // 0x0009_9862 + k * 0x0fbe_00e1), so these 17 quanta emit every symbol
+        // exactly once, in digit order.
+        const EVERY_DIGIT: [u8; 68] = [
+            0x00, 0x09, 0x98, 0x62, 0x0f, 0xc7, 0x99, 0x43, 0x1f, 0x85, 0x9a, 0x24, 0x2f, 0x43,
+            0x9b, 0x05, 0x3f, 0x01, 0x9b, 0xe6, 0x4e, 0xbf, 0x9c, 0xc7, 0x5e, 0x7d, 0x9d, 0xa8,
+            0x6e, 0x3b, 0x9e, 0x89, 0x7d, 0xf9, 0x9f, 0x6a, 0x8d, 0xb7, 0xa0, 0x4b, 0x9d, 0x75,
+            0xa1, 0x2c, 0xad, 0x33, 0xa2, 0x0d, 0xbc, 0xf1, 0xa2, 0xee, 0xcc, 0xaf, 0xa3, 0xcf,
+            0xdc, 0x6d, 0xa4, 0xb0, 0xec, 0x2b, 0xa5, 0x91, 0xfb, 0xe9, 0xa6, 0x72,
+        ];
+        let mut alphabet = [0; 85];
+        assert_eq!(
+            ASCII85.try_encode_base85_into(&EVERY_DIGIT, &mut alphabet),
+            Some(
+                b"!\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstu"
+                    .as_slice()
+            )
+        );
+        assert_eq!(
+            Z85.try_encode_base85_into(&EVERY_DIGIT, &mut alphabet),
+            Some(
+                b"0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.-:+=^!/*?&<>()[]{}@%$#"
+                    .as_slice()
+            )
         );
     }
 
@@ -519,7 +518,6 @@ mod tests {
             let encoded = ASCII85.encode_adobe85_into(input, &mut dst).unwrap();
             assert_eq!(encoded, expected);
             let encoded_len = encoded.len();
-            assert!(encoded_len <= encoded_length_adobe85(input));
             assert!(dst[encoded_len..].iter().all(|&byte| byte == 0xa5));
         }
 

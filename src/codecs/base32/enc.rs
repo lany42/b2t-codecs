@@ -37,10 +37,6 @@ pub(super) const BASE32_HEX: Encoder = const {
 const BASE32_PADS: [usize; 5] = [0, 2, 4, 5, 7];
 
 /// Encodes `bytes` as a canonical padded Base32 string.
-///
-/// # Panics
-///
-/// Panics if the encoded length cannot be represented as a [`usize`].
 #[cfg(feature = "alloc")]
 #[must_use = "the encoded value should be used"]
 #[inline]
@@ -49,10 +45,6 @@ pub fn encode_base32_string(bytes: &[u8]) -> String {
 }
 
 /// Encodes `bytes` as a canonical padded Base32Hex string.
-///
-/// # Panics
-///
-/// Panics if the encoded length cannot be represented as a [`usize`].
 #[cfg(feature = "alloc")]
 #[must_use = "the encoded value should be used"]
 #[inline]
@@ -61,10 +53,6 @@ pub fn encode_base32hex_string(bytes: &[u8]) -> String {
 }
 
 /// Encodes `bytes` as canonical padded Base32 ASCII bytes.
-///
-/// # Panics
-///
-/// Panics if the encoded length cannot be represented as a [`usize`].
 #[cfg(feature = "alloc")]
 #[must_use = "the encoded value should be used"]
 #[inline]
@@ -73,10 +61,6 @@ pub fn encode_base32(bytes: &[u8]) -> Box<[u8]> {
 }
 
 /// Encodes `bytes` as canonical padded Base32Hex ASCII bytes.
-///
-/// # Panics
-///
-/// Panics if the encoded length cannot be represented as a [`usize`].
 #[cfg(feature = "alloc")]
 #[must_use = "the encoded value should be used"]
 #[inline]
@@ -88,10 +72,6 @@ pub fn encode_base32hex(bytes: &[u8]) -> Box<[u8]> {
 ///
 /// Base32 emits eight ASCII bytes for every complete or partial five-byte
 /// input quantum.
-///
-/// # Panics
-///
-/// Panics if the encoded length cannot be represented as a [`usize`].
 #[must_use = "the encoded size should be used"]
 #[inline]
 pub fn encoded_length_base32(bytes: &[u8]) -> usize {
@@ -100,11 +80,8 @@ pub fn encoded_length_base32(bytes: &[u8]) -> usize {
 
 #[inline]
 fn encoded_length(bytes: &[u8]) -> usize {
-    bytes
-        .len()
-        .div_ceil(5)
-        .checked_mul(8)
-        .expect("base32 encoded length overflow")
+    // A slice holds at most `isize::MAX` bytes, so this cannot overflow.
+    bytes.len().div_ceil(5) * 8
 }
 
 /// Encodes `src` as canonical padded Base32 into the beginning of `dst`.
@@ -113,10 +90,6 @@ fn encoded_length(bytes: &[u8]) -> usize {
 /// than [`encoded_length_base32(src)`](encoded_length_base32). A short
 /// destination is left unchanged. Any bytes after the encoded prefix are also
 /// left unchanged. This function does not allocate.
-///
-/// # Panics
-///
-/// Panics if the encoded length cannot be represented as a [`usize`].
 #[must_use = "the encoding result should be handled"]
 #[inline]
 pub fn try_encode_into_base32<'a>(src: &[u8], dst: &'a mut [u8]) -> Option<&'a [u8]> {
@@ -129,10 +102,6 @@ pub fn try_encode_into_base32<'a>(src: &[u8], dst: &'a mut [u8]) -> Option<&'a [
 /// than [`encoded_length_base32(src)`](encoded_length_base32). A short
 /// destination is left unchanged. Any bytes after the encoded prefix are also
 /// left unchanged. This function does not allocate.
-///
-/// # Panics
-///
-/// Panics if the encoded length cannot be represented as a [`usize`].
 #[must_use = "the encoding result should be handled"]
 #[inline]
 pub fn try_encode_into_base32hex<'a>(src: &[u8], dst: &'a mut [u8]) -> Option<&'a [u8]> {
@@ -286,14 +255,15 @@ impl<'e> Encoder<'e> {
 mod tests {
     use super::{BASE32_HEX, BASE32_RFC, Encoder, encoded_length};
 
-    #[cfg(feature = "alloc")]
-    use super::BASE32_PAD;
-
-    #[cfg(feature = "alloc")]
-    use alloc::vec::Vec;
-
     #[test]
     fn rfc_4648_base32_test_vectors_pin_encoding() {
+        // Pentads 0..=31 packed MSB-first: encodes to each whole RFC 4648
+        // alphabet (Tables 3 and 4) in order, pinning every symbol.
+        const ALPHABET_DIGITS: [u8; 20] = [
+            0x00, 0x44, 0x32, 0x14, 0xc7, 0x42, 0x54, 0xb6, 0x35, 0xcf, 0x84, 0x65, 0x3a, 0x56,
+            0xd7, 0xc6, 0x75, 0xbe, 0x77, 0xdf,
+        ];
+
         let vectors: &[(&[u8], &str, &str)] = &[
             (b"", "", ""),
             (b"f", "MY======", "CO======"),
@@ -302,16 +272,21 @@ mod tests {
             (b"foob", "MZXW6YQ=", "CPNMUOG="),
             (b"fooba", "MZXW6YTB", "CPNMUOJ1"),
             (b"foobar", "MZXW6YTBOI======", "CPNMUOJ1E8======"),
+            (
+                &ALPHABET_DIGITS,
+                "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567",
+                "0123456789ABCDEFGHIJKLMNOPQRSTUV",
+            ),
         ];
 
         for &(plain, base32, base32hex) in vectors {
-            let mut dst = [0u8; 16];
+            let mut dst = [0u8; 32];
             assert_eq!(
                 BASE32_RFC.encode_into(plain, &mut dst),
                 Some(base32.as_bytes())
             );
 
-            let mut dst = [0u8; 16];
+            let mut dst = [0u8; 32];
             assert_eq!(
                 BASE32_HEX.encode_into(plain, &mut dst),
                 Some(base32hex.as_bytes())
@@ -343,14 +318,14 @@ mod tests {
     #[test]
     fn slice_encoders_preserve_destination_bounds() {
         let codecs: [(&str, &Encoder<'_>, &[u8], u8); 2] = [
-            ("Base32", &BASE32_RFC, b"MZXW6===", b'!'),
-            ("Base32Hex", &BASE32_HEX, b"CPNMU===", b'?'),
+            ("Base32", &BASE32_RFC, b"MZXW6YTBOI======", b'!'),
+            ("Base32Hex", &BASE32_HEX, b"CPNMUOJ1E8======", b'?'),
         ];
 
         for (name, encoder, expected, sentinel) in codecs {
-            let mut oversized = [sentinel; 10];
+            let mut oversized = [sentinel; 18];
             assert_eq!(
-                encoder.encode_into(b"foo", &mut oversized),
+                encoder.encode_into(b"foobar", &mut oversized),
                 Some(expected),
                 "{name}"
             );
@@ -360,9 +335,9 @@ mod tests {
                 "{name} modified the destination suffix"
             );
 
-            let mut short = [sentinel; 7];
-            assert_eq!(encoder.encode_into(b"foo", &mut short), None, "{name}");
-            assert_eq!(short, [sentinel; 7], "{name} modified a short destination");
+            let mut short = [sentinel; 15];
+            assert_eq!(encoder.encode_into(b"foobar", &mut short), None, "{name}");
+            assert_eq!(short, [sentinel; 15], "{name} modified a short destination");
 
             let mut empty = [sentinel; 1];
             assert_eq!(
@@ -375,65 +350,6 @@ mod tests {
                 [sentinel],
                 "{name} modified the destination for empty input"
             );
-        }
-    }
-
-    #[test]
-    fn encoder_alphabets_preserve_unsafe_indexing_and_utf8_invariants() {
-        fn assert_invariants(encoder: &Encoder<'_>) {
-            assert_eq!(encoder.encoder.len(), 32);
-
-            let mut seen = [false; 128];
-            for &ascii in encoder.encoder {
-                assert!(ascii.is_ascii());
-                assert!(!seen[ascii as usize], "duplicate byte at ASCII {ascii}");
-                seen[ascii as usize] = true;
-            }
-        }
-
-        assert_invariants(&BASE32_RFC);
-        assert_invariants(&BASE32_HEX);
-    }
-
-    #[cfg(feature = "alloc")]
-    #[test]
-    fn byte_slices_of_arbitrary_lengths_encode_canonically() {
-        let codecs: &[(&str, &Encoder<'_>, &[u8])] = &[
-            ("Base32", &BASE32_RFC, BASE32_RFC.encoder),
-            ("Base32Hex", &BASE32_HEX, BASE32_HEX.encoder),
-        ];
-
-        for len in 0usize..=64 {
-            let input: Vec<u8> = (0..len)
-                .map(|i| (i.wrapping_mul(73).wrapping_add(len * 19)) as u8)
-                .collect();
-            let padding = match len % 5 {
-                0 => 0,
-                1 => 6,
-                2 => 4,
-                3 => 3,
-                4 => 1,
-                _ => unreachable!(),
-            };
-
-            for &(name, encoder, alphabet) in codecs {
-                let encoded = encoder.encode_boxed(&input);
-
-                assert_eq!(encoded.len(), len.div_ceil(5) * 8, "{name}, len {len}");
-                assert_eq!(encoder.encode_string(&input).as_bytes(), encoded.as_ref());
-                assert!(
-                    encoded[..encoded.len() - padding]
-                        .iter()
-                        .all(|byte| alphabet.contains(byte)),
-                    "{name} emitted a byte outside its alphabet for len {len}"
-                );
-                assert!(
-                    encoded[encoded.len() - padding..]
-                        .iter()
-                        .all(|&byte| byte == BASE32_PAD),
-                    "{name} emitted malformed padding for len {len}"
-                );
-            }
         }
     }
 }

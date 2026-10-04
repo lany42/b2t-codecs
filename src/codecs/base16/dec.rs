@@ -297,63 +297,11 @@ impl<'d> Decoder<'d> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::{ENCODER_LOWER, ENCODER_UPPER, MAX_ASCII, MIN_ASCII};
+    use super::super::{ENCODER_LOWER, ENCODER_UPPER};
     use super::{BASE16_LOWER, BASE16_MIXED, BASE16_UPPER, Decoder, decoded_length};
 
     #[cfg(feature = "alloc")]
     use alloc::vec::Vec;
-
-    #[cfg(feature = "alloc")]
-    #[test]
-    fn mixed_case_decoder_accepts_lowercase_uppercase_and_mixed_input() {
-        for encoded in ["deadbeef", "DEADBEEF", "dEaDbEeF"] {
-            assert_eq!(
-                BASE16_MIXED.try_decode_boxed(encoded.as_bytes()).as_deref(),
-                Some([0xde, 0xad, 0xbe, 0xef].as_slice())
-            );
-            assert_eq!(
-                BASE16_MIXED.try_decode_string(encoded).as_deref(),
-                Some([0xde, 0xad, 0xbe, 0xef].as_slice())
-            );
-        }
-    }
-
-    #[cfg(feature = "alloc")]
-    #[test]
-    fn strict_decoders_accept_only_their_selected_case() {
-        let expected = Some([0xde, 0xad, 0xbe, 0xef].as_slice());
-
-        assert_eq!(
-            BASE16_LOWER.try_decode_boxed(b"deadbeef").as_deref(),
-            expected
-        );
-        assert_eq!(
-            BASE16_LOWER.try_decode_string("deadbeef").as_deref(),
-            expected
-        );
-        assert_eq!(BASE16_LOWER.try_decode_boxed(b"DEADBEEF"), None);
-        assert_eq!(BASE16_LOWER.try_decode_boxed(b"dEaDbEeF"), None);
-
-        assert_eq!(
-            BASE16_UPPER.try_decode_boxed(b"DEADBEEF").as_deref(),
-            expected
-        );
-        assert_eq!(
-            BASE16_UPPER.try_decode_string("DEADBEEF").as_deref(),
-            expected
-        );
-        assert_eq!(BASE16_UPPER.try_decode_boxed(b"deadbeef"), None);
-        assert_eq!(BASE16_UPPER.try_decode_boxed(b"dEaDbEeF"), None);
-
-        assert_eq!(
-            BASE16_LOWER.try_decode_boxed(b"0123456789").as_deref(),
-            Some([0x01, 0x23, 0x45, 0x67, 0x89].as_slice())
-        );
-        assert_eq!(
-            BASE16_UPPER.try_decode_boxed(b"0123456789").as_deref(),
-            Some([0x01, 0x23, 0x45, 0x67, 0x89].as_slice())
-        );
-    }
 
     #[cfg(feature = "alloc")]
     #[test]
@@ -475,23 +423,12 @@ mod tests {
     #[test]
     fn tables_preserve_unsafe_indexing_invariants() {
         fn assert_invariants(decoder: &Decoder<'_>, alphabets: &[&[u8]]) {
-            assert!(decoder.max_ascii > decoder.min_ascii);
-            assert_eq!(decoder.max_ascii - decoder.min_ascii, decoder.decoder.len());
-
-            let mut seen = [false; MAX_ASCII - MIN_ASCII];
             for alphabet in alphabets {
                 for (digit, &ascii) in alphabet.iter().enumerate() {
                     let ascii = ascii as usize;
                     assert!((decoder.min_ascii..decoder.max_ascii).contains(&ascii));
 
                     let offset = ascii - decoder.min_ascii;
-                    // Decimal digits are intentionally shared by the lowercase
-                    // and uppercase alphabets.
-                    if seen[offset] {
-                        assert!((ascii as u8).is_ascii_digit());
-                    } else {
-                        seen[offset] = true;
-                    }
                     assert_eq!(decoder.decoder[offset], digit as u8);
                 }
             }

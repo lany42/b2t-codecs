@@ -451,14 +451,60 @@ mod tests {
     }
 
     #[test]
-    fn integer_primitive_decoding_requires_the_exact_data_width() {
-        assert_eq!(u64::try_from_base85(b"!!!!!"), None);
-        assert_eq!(u64::try_from_base85(b"!!!!!!!!!!"), Some(0));
-        assert_eq!(u64::try_from_base85(b"!!!!!!!!!!!!!!!"), None);
+    fn allocating_public_decoders_select_their_codec() {
+        let quantum: &[u8] = &[0x86, 0x4f, 0xd2, 0x6f];
+        let zero_then_quantum: &[u8] = &[0, 0, 0, 0, 0x86, 0x4f, 0xd2, 0x6f];
 
-        assert_eq!(u64::try_from_z85(b"00000"), None);
-        assert_eq!(u64::try_from_z85(b"0000000000"), Some(0));
-        assert_eq!(u64::try_from_z85(b"000000000000000"), None);
+        assert_eq!(
+            crate::try_decode_ascii85(b"L/669").as_deref(),
+            Some(quantum)
+        );
+        assert_eq!(
+            crate::try_decode_ascii85_string("L/669").as_deref(),
+            Some(quantum)
+        );
+        assert_eq!(crate::try_decode_z85(b"Hello").as_deref(), Some(quantum));
+        assert_eq!(
+            crate::try_decode_z85_string("Hello").as_deref(),
+            Some(quantum)
+        );
+        assert_eq!(
+            crate::try_decode_adobe85(b"z L/669").as_deref(),
+            Some(zero_then_quantum)
+        );
+        assert_eq!(
+            crate::try_decode_adobe85_string("z L/669").as_deref(),
+            Some(zero_then_quantum)
+        );
+
+        // Strict decoders reject the Adobe85 shorthand; Z85 treats `z` as digit 35.
+        assert_eq!(crate::try_decode_ascii85(b"z    "), None);
+        assert_eq!(crate::try_decode_ascii85_string("z    "), None);
+        assert_eq!(
+            crate::try_decode_z85(b"0000z").as_deref(),
+            Some([0, 0, 0, 0x23].as_slice())
+        );
+        assert_eq!(
+            crate::try_decode_z85_string("0000z").as_deref(),
+            Some([0, 0, 0, 0x23].as_slice())
+        );
+    }
+
+    #[cfg(target_pointer_width = "32")]
+    #[test]
+    fn adobe85_decodes_input_whose_length_times_four_overflows_usize() {
+        use alloc::vec;
+
+        // 2^30 symbols times four overflows a 32-bit usize. Leading whitespace
+        // keeps the decoded output to one quantum.
+        let mut adobe85 = vec![b' '; 1 << 30];
+        let len = adobe85.len();
+        adobe85[len - 5..].copy_from_slice(b"L/669");
+
+        assert_eq!(
+            crate::try_decode_adobe85(&adobe85).as_deref(),
+            Some([0x86, 0x4f, 0xd2, 0x6f].as_slice())
+        );
     }
 
     mod adobe85 {
@@ -497,13 +543,6 @@ mod tests {
             assert_min_and_max_encoding!(i32, "J,fQL", "J,fQK");
             assert_min_and_max_encoding!(i64, "J,fQLz", "J,fQKs8W-!");
             assert_min_and_max_encoding!(i128, "J,fQLzzz", "J,fQKs8W-!s8W-!s8W-!");
-        }
-
-        #[test]
-        fn integer_primitive_decoding_requires_the_exact_data_width() {
-            assert_eq!(u32::try_from_adobe85(b"!!!"), None);
-            assert_eq!(u32::try_from_adobe85(b"z"), Some(0));
-            assert_eq!(u32::try_from_adobe85(b"zz"), None);
         }
     }
 }

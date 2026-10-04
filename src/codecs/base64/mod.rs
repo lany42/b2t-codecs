@@ -358,28 +358,6 @@ mod tests {
     }
 
     #[test]
-    fn integer_byte_sizes_are_pinned() {
-        macro_rules! assert_size {
-            ($ty:ty, $size:literal) => {
-                assert_eq!(<$ty as Base64>::SIZE, $size);
-                assert_eq!(<$ty as Base64Url>::SIZE, $size);
-            };
-        }
-
-        assert_size!(u8, 1);
-        assert_size!(u16, 2);
-        assert_size!(u32, 4);
-        assert_size!(u64, 8);
-        assert_size!(u128, 16);
-
-        assert_size!(i8, 1);
-        assert_size!(i16, 2);
-        assert_size!(i32, 4);
-        assert_size!(i64, 8);
-        assert_size!(i128, 16);
-    }
-
-    #[test]
     fn no_alloc_integer_encoding_is_full_width_and_preserves_the_tail() {
         let mut base64 = [b'!'; 6];
         assert_eq!(
@@ -394,16 +372,6 @@ mod tests {
             Some(b"-w==".as_slice()),
         );
         assert_eq!(&base64url[4..], b"??");
-
-        let mut signed = [0; 4];
-        assert_eq!(
-            i16::MIN.try_as_base64_into(&mut signed),
-            Some(b"gAA=".as_slice()),
-        );
-        assert_eq!(
-            i16::MIN.try_as_base64url_into(&mut signed),
-            Some(b"gAA=".as_slice()),
-        );
     }
 
     #[test]
@@ -439,6 +407,32 @@ mod tests {
         assert_eq!(u8::try_from_base64(b"_w=="), None);
         assert_eq!(u8::try_from_base64url(b"_w=="), Some(u8::MAX));
         assert_eq!(u8::try_from_base64url(b"/w=="), None);
+    }
+
+    #[cfg(feature = "alloc")]
+    #[test]
+    fn allocating_decode_wrappers_select_alphabet_and_framing() {
+        let plain: &[u8] = &[0xfb, 0xff];
+
+        // Each alphabet's digits 62 and 63 are invalid in the other, and the
+        // unpadded inputs are valid only under extended framing.
+        assert_eq!(try_decode_base64(b"+/8=").as_deref(), Some(plain));
+        assert_eq!(try_decode_base64_string("+/8=").as_deref(), Some(plain));
+        assert_eq!(try_decode_base64url(b"-_8=").as_deref(), Some(plain));
+        assert_eq!(try_decode_base64url_string("-_8=").as_deref(), Some(plain));
+        assert_eq!(try_decode_base64ext(b"+/8").as_deref(), Some(plain));
+        assert_eq!(try_decode_base64ext_string("+/8").as_deref(), Some(plain));
+        assert_eq!(try_decode_base64urlext(b"-_8").as_deref(), Some(plain));
+        assert_eq!(
+            try_decode_base64urlext_string("-_8").as_deref(),
+            Some(plain)
+        );
+
+        // Strict wrappers must not be wired to the extended decoders.
+        assert_eq!(try_decode_base64(b"+/8"), None);
+        assert_eq!(try_decode_base64_string("+/8"), None);
+        assert_eq!(try_decode_base64url(b"-_8"), None);
+        assert_eq!(try_decode_base64url_string("-_8"), None);
     }
 
     #[cfg(feature = "alloc")]

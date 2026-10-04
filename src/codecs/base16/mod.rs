@@ -249,21 +249,6 @@ mod tests {
     }
 
     #[test]
-    fn integer_byte_sizes_are_pinned() {
-        assert_eq!(u8::SIZE, 1);
-        assert_eq!(u16::SIZE, 2);
-        assert_eq!(u32::SIZE, 4);
-        assert_eq!(u64::SIZE, 8);
-        assert_eq!(u128::SIZE, 16);
-
-        assert_eq!(i8::SIZE, 1);
-        assert_eq!(i16::SIZE, 2);
-        assert_eq!(i32::SIZE, 4);
-        assert_eq!(i64::SIZE, 8);
-        assert_eq!(i128::SIZE, 16);
-    }
-
-    #[test]
     fn no_alloc_integer_encoding_is_full_width_and_preserves_the_tail() {
         let mut dst = [b'!'; 10];
         assert_eq!(
@@ -271,12 +256,6 @@ mod tests {
             Some(b"deadbeef".as_slice()),
         );
         assert_eq!(&dst[8..], b"!!");
-
-        let mut signed = [0; 4];
-        assert_eq!(
-            i16::MIN.try_as_base16_into(&mut signed),
-            Some(b"8000".as_slice()),
-        );
     }
 
     #[test]
@@ -284,5 +263,52 @@ mod tests {
         let mut dst = [b'!'; 7];
         assert_eq!(0xdead_beefu32.try_as_base16_into(&mut dst), None);
         assert_eq!(dst, [b'!'; 7]);
+    }
+
+    #[cfg(feature = "alloc")]
+    #[test]
+    fn allocating_api_is_reexported_and_wired_to_the_right_alphabet() {
+        // Covers every symbol of both alphabets. Only the mixed-case decoders
+        // accept `mixed`; each strict decoder accepts only its own case.
+        let plain: &[u8] = &[0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef];
+        let lower = "0123456789abcdef";
+        let upper = "0123456789ABCDEF";
+        let mixed = "0123456789aBcDeF";
+
+        assert_eq!(crate::encode_base16(plain).as_ref(), lower.as_bytes());
+        assert_eq!(crate::encode_base16_string(plain), lower);
+        assert_eq!(crate::encode_base16upper(plain).as_ref(), upper.as_bytes());
+        assert_eq!(crate::encode_base16upper_string(plain), upper);
+
+        assert_eq!(
+            crate::try_decode_base16(mixed.as_bytes()).as_deref(),
+            Some(plain)
+        );
+        assert_eq!(
+            crate::try_decode_base16_string(mixed).as_deref(),
+            Some(plain)
+        );
+
+        assert_eq!(
+            crate::try_decode_base16lower(lower.as_bytes()).as_deref(),
+            Some(plain)
+        );
+        assert_eq!(
+            crate::try_decode_base16lower_string(lower).as_deref(),
+            Some(plain)
+        );
+        assert_eq!(crate::try_decode_base16lower(mixed.as_bytes()), None);
+        assert_eq!(crate::try_decode_base16lower_string(mixed), None);
+
+        assert_eq!(
+            crate::try_decode_base16upper(upper.as_bytes()).as_deref(),
+            Some(plain)
+        );
+        assert_eq!(
+            crate::try_decode_base16upper_string(upper).as_deref(),
+            Some(plain)
+        );
+        assert_eq!(crate::try_decode_base16upper(mixed.as_bytes()), None);
+        assert_eq!(crate::try_decode_base16upper_string(mixed), None);
     }
 }

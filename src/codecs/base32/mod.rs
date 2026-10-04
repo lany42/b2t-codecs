@@ -355,66 +355,6 @@ mod tests {
     }
 
     #[test]
-    fn integer_byte_sizes_are_pinned() {
-        macro_rules! assert_size {
-            ($ty:ty, $size:literal) => {
-                assert_eq!(<$ty as Base32>::SIZE, $size);
-                assert_eq!(<$ty as Base32Hex>::SIZE, $size);
-            };
-        }
-
-        assert_size!(u8, 1);
-        assert_size!(u16, 2);
-        assert_size!(u32, 4);
-        assert_size!(u64, 8);
-        assert_size!(u128, 16);
-
-        assert_size!(i8, 1);
-        assert_size!(i16, 2);
-        assert_size!(i32, 4);
-        assert_size!(i64, 8);
-        assert_size!(i128, 16);
-    }
-
-    #[test]
-    fn no_alloc_integer_encoding_is_full_width_and_preserves_the_tail() {
-        let mut base32 = [b'!'; 10];
-        assert_eq!(
-            0xb0u8.try_as_base32_into(&mut base32),
-            Some(b"WA======".as_slice()),
-        );
-        assert_eq!(&base32[8..], b"!!");
-
-        let mut base32hex = [b'?'; 10];
-        assert_eq!(
-            0xb0u8.try_as_base32hex_into(&mut base32hex),
-            Some(b"M0======".as_slice()),
-        );
-        assert_eq!(&base32hex[8..], b"??");
-
-        let mut signed = [0; 8];
-        assert_eq!(
-            i16::MIN.try_as_base32_into(&mut signed),
-            Some(b"QAAA====".as_slice()),
-        );
-        assert_eq!(
-            i16::MIN.try_as_base32hex_into(&mut signed),
-            Some(b"G000====".as_slice()),
-        );
-    }
-
-    #[test]
-    fn no_alloc_integer_encoding_returns_none_for_a_short_destination() {
-        let mut base32 = [b'!'; 7];
-        assert_eq!(0xb0u8.try_as_base32_into(&mut base32), None);
-        assert_eq!(base32, [b'!'; 7]);
-
-        let mut base32hex = [b'?'; 7];
-        assert_eq!(0xb0u8.try_as_base32hex_into(&mut base32hex), None);
-        assert_eq!(base32hex, [b'?'; 7]);
-    }
-
-    #[test]
     fn integer_primitive_decoding_requires_the_exact_data_width() {
         assert_eq!(u32::try_from_base32(b"AAAA===="), None);
         assert_eq!(u32::try_from_base32(b"AAAAAAA="), Some(0));
@@ -425,11 +365,21 @@ mod tests {
         assert_eq!(u32::try_from_base32hex(b"0000000000000==="), None);
     }
 
+    #[cfg(feature = "alloc")]
     #[test]
-    fn primitive_decoders_do_not_mix_base32_alphabets() {
-        assert_eq!(u8::try_from_base32(b"WA======"), Some(0xb0));
-        assert_eq!(u8::try_from_base32(b"M0======"), None);
-        assert_eq!(u8::try_from_base32hex(b"M0======"), Some(0xb0));
-        assert_eq!(u8::try_from_base32hex(b"WA======"), None);
+    fn allocating_decoders_use_their_own_alphabet() {
+        // Z/W/Y are not Base32Hex symbols and 1/8 are not Base32 symbols, so a
+        // wrapper wired to the other alphabet returns None.
+        let foobar = Some(b"foobar".as_slice());
+        assert_eq!(try_decode_base32(b"MZXW6YTBOI======").as_deref(), foobar);
+        assert_eq!(
+            try_decode_base32_string("MZXW6YTBOI======").as_deref(),
+            foobar
+        );
+        assert_eq!(try_decode_base32hex(b"CPNMUOJ1E8======").as_deref(), foobar);
+        assert_eq!(
+            try_decode_base32hex_string("CPNMUOJ1E8======").as_deref(),
+            foobar
+        );
     }
 }

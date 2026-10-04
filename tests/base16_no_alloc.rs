@@ -36,6 +36,7 @@ fn non_allocating_base16_api_is_reexported_from_the_crate_root() {
         try_decode_from_base16upper(b"ABCD", &mut decoded),
         Some([0xab, 0xcd].as_slice()),
     );
+    assert_eq!(try_decode_from_base16lower(b"ABCD", &mut decoded), None);
 
     let mut primitive = [0; 4];
     assert_eq!(

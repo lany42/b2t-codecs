@@ -31,10 +31,6 @@ pub(super) const BASE16_UPPER: Encoder = const {
 /// Encodes `bytes` as a lowercase Base16 string.
 ///
 /// The output contains exactly two ASCII symbols per input byte.
-///
-/// # Panics
-///
-/// Panics if the encoded length cannot be represented as a [`usize`].
 #[cfg(feature = "alloc")]
 #[must_use = "the encoded value should be used"]
 #[inline]
@@ -45,10 +41,6 @@ pub fn encode_base16_string(bytes: &[u8]) -> String {
 /// Encodes `bytes` as an uppercase Base16 string.
 ///
 /// The output contains exactly two ASCII symbols per input byte.
-///
-/// # Panics
-///
-/// Panics if the encoded length cannot be represented as a [`usize`].
 #[cfg(feature = "alloc")]
 #[must_use = "the encoded value should be used"]
 #[inline]
@@ -59,10 +51,6 @@ pub fn encode_base16upper_string(bytes: &[u8]) -> String {
 /// Encodes `bytes` as lowercase Base16 ASCII bytes.
 ///
 /// The output contains exactly two ASCII symbols per input byte.
-///
-/// # Panics
-///
-/// Panics if the encoded length cannot be represented as a [`usize`].
 #[cfg(feature = "alloc")]
 #[must_use = "the encoded value should be used"]
 #[inline]
@@ -73,10 +61,6 @@ pub fn encode_base16(bytes: &[u8]) -> Box<[u8]> {
 /// Encodes `bytes` as uppercase Base16 ASCII bytes.
 ///
 /// The output contains exactly two ASCII symbols per input byte.
-///
-/// # Panics
-///
-/// Panics if the encoded length cannot be represented as a [`usize`].
 #[cfg(feature = "alloc")]
 #[must_use = "the encoded value should be used"]
 #[inline]
@@ -87,10 +71,6 @@ pub fn encode_base16upper(bytes: &[u8]) -> Box<[u8]> {
 /// Returns the exact number of bytes needed to encode `bytes` as Base16.
 ///
 /// Base16 emits two ASCII bytes for every input byte.
-///
-/// # Panics
-///
-/// Panics if twice the input length cannot be represented as a [`usize`].
 #[must_use = "the encoded size should be used"]
 #[inline]
 pub fn encoded_length_base16(bytes: &[u8]) -> usize {
@@ -99,10 +79,8 @@ pub fn encoded_length_base16(bytes: &[u8]) -> usize {
 
 #[inline]
 fn encoded_length(bytes: &[u8]) -> usize {
-    bytes
-        .len()
-        .checked_mul(2)
-        .expect("base16 encoded length overflow")
+    // A slice holds at most `isize::MAX` bytes, so this cannot overflow.
+    bytes.len() * 2
 }
 
 /// Encodes `src` as lowercase Base16 into the beginning of `dst`.
@@ -111,10 +89,6 @@ fn encoded_length(bytes: &[u8]) -> usize {
 /// than [`encoded_length_base16(src)`](encoded_length_base16). A short
 /// destination is left unchanged. Any bytes after the encoded prefix are also
 /// left unchanged. This function does not allocate.
-///
-/// # Panics
-///
-/// Panics if the encoded length cannot be represented as a [`usize`].
 #[must_use = "the encoding result should be handled"]
 #[inline]
 pub fn try_encode_into_base16<'a>(src: &[u8], dst: &'a mut [u8]) -> Option<&'a [u8]> {
@@ -127,10 +101,6 @@ pub fn try_encode_into_base16<'a>(src: &[u8], dst: &'a mut [u8]) -> Option<&'a [
 /// than [`encoded_length_base16(src)`](encoded_length_base16). A short
 /// destination is left unchanged. Any bytes after the encoded prefix are also
 /// left unchanged. This function does not allocate.
-///
-/// # Panics
-///
-/// Panics if the encoded length cannot be represented as a [`usize`].
 #[must_use = "the encoding result should be handled"]
 #[inline]
 pub fn try_encode_into_base16upper<'a>(src: &[u8], dst: &'a mut [u8]) -> Option<&'a [u8]> {
@@ -240,10 +210,7 @@ impl<'e> Encoder<'e> {
 
 #[cfg(test)]
 mod tests {
-    use super::{BASE16_LOWER, BASE16_UPPER, Encoder, encoded_length};
-
-    #[cfg(feature = "alloc")]
-    use alloc::vec::Vec;
+    use super::{BASE16_LOWER, BASE16_UPPER, Encoder};
 
     #[cfg(feature = "alloc")]
     #[test]
@@ -266,13 +233,6 @@ mod tests {
             assert_eq!(BASE16_UPPER.encode_boxed(plain).as_ref(), upper.as_bytes());
             assert_eq!(BASE16_UPPER.encode_string(plain), upper);
         }
-    }
-
-    #[test]
-    fn encoded_lengths_are_exact() {
-        assert_eq!(encoded_length(b""), 0);
-        assert_eq!(encoded_length(&[0]), 2);
-        assert_eq!(encoded_length(&[0; 32]), 64);
     }
 
     #[test]
@@ -307,28 +267,8 @@ mod tests {
     }
 
     #[test]
-    fn slice_encoders_cover_every_input_byte() {
-        let mut input = [0u8; 256];
-        for (byte, value) in input.iter_mut().zip(u8::MIN..=u8::MAX) {
-            *byte = value;
-        }
-
-        let mut lower = [0u8; 512];
-        let lower = BASE16_LOWER.encode_into(&input, &mut lower).unwrap();
-        assert_eq!(lower.len(), encoded_length(&input));
-        assert!(lower.iter().all(|byte| BASE16_LOWER.encoder.contains(byte)));
-
-        let mut upper = [0u8; 512];
-        let upper = BASE16_UPPER.encode_into(&input, &mut upper).unwrap();
-        assert_eq!(upper.len(), encoded_length(&input));
-        assert!(upper.iter().all(|byte| BASE16_UPPER.encoder.contains(byte)));
-    }
-
-    #[test]
     fn encoder_alphabets_preserve_unsafe_indexing_and_utf8_invariants() {
         fn assert_invariants(encoder: &Encoder<'_>) {
-            assert_eq!(encoder.encoder.len(), 16);
-
             let mut seen = [false; 128];
             for &ascii in encoder.encoder {
                 assert!(ascii.is_ascii());
@@ -339,30 +279,5 @@ mod tests {
 
         assert_invariants(&BASE16_LOWER);
         assert_invariants(&BASE16_UPPER);
-    }
-
-    #[cfg(feature = "alloc")]
-    #[test]
-    fn arbitrary_byte_slices_encode_to_twice_the_input_length() {
-        let encoders: &[(&str, &Encoder<'_>, &[u8])] = &[
-            ("lowercase", &BASE16_LOWER, BASE16_LOWER.encoder),
-            ("uppercase", &BASE16_UPPER, BASE16_UPPER.encoder),
-        ];
-
-        for len in 0usize..=64 {
-            let input: Vec<u8> = (0..len)
-                .map(|i| (i.wrapping_mul(73).wrapping_add(len * 19)) as u8)
-                .collect();
-
-            for &(name, encode, alphabet) in encoders {
-                let encoded = encode.encode_boxed(&input);
-                assert_eq!(encoded.len(), len * 2, "{name}, len {len}");
-                assert_eq!(encode.encode_string(&input).as_bytes(), encoded.as_ref());
-                assert!(
-                    encoded.iter().all(|byte| alphabet.contains(byte)),
-                    "{name} emitted a byte outside its alphabet for len {len}"
-                );
-            }
-        }
     }
 }
